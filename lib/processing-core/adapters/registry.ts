@@ -19,6 +19,7 @@ export type FormatAdapter = Readonly<{
 export interface FormatAdapterRegistry {
   register(adapter: FormatAdapter): BoundaryResult<void>
   resolve(input: LocalInputDescriptor, operation: Operation): BoundaryResult<FormatAdapter>
+  resolveInspection(input: LocalInputDescriptor): BoundaryResult<FormatAdapter>
   list(): readonly FormatAdapter[]
 }
 
@@ -39,6 +40,10 @@ export function createFormatAdapterRegistry(): FormatAdapterRegistry {
     resolve(input, operation) {
       const adapter = adapters.find(candidate => matches(candidate, input, operation))
       return adapter ? { ok: true, value: adapter } : { ok: false, error: { code: 'UNSUPPORTED', message: `No adapter is registered for ${operation}.` } }
+    },
+    resolveInspection(input) {
+      const adapter = adapters.find(candidate => matches(candidate, input, 'inspect') && typeof candidate.inspect === 'function')
+      return adapter ? { ok: true, value: adapter } : { ok: false, error: { code: 'UNSUPPORTED', message: 'No inspection adapter is registered for this input.' } }
     },
     list: () => adapters.slice(),
   }

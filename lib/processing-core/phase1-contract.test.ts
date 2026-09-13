@@ -127,7 +127,7 @@ async function main() {
   await test('JPEG registry exposes inspection only', () => {
     const registry = createFormatAdapterRegistry()
     assert.equal(registry.register(jpegAdapter).ok, true)
-    assert.equal(registry.resolve(input.descriptor, 'inspect').ok, true)
+    assert.equal(registry.resolveInspection(input.descriptor).ok, true)
     assert.equal(registry.resolve(input.descriptor, 'remove').ok, false)
     assert.equal(jpegAdapter.capability.operations.length, 1)
   })
