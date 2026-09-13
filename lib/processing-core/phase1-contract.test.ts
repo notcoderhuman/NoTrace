@@ -5,6 +5,9 @@ import { createDescriptorInput, createMemoryInput } from './domain/input'
 import { inspectJpeg, jpegAdapter } from './adapters/jpeg'
 import { createNoopBoundary } from '../local-boundary/noop-boundary'
 import type { MetadataField, SafetyClassification } from './domain/metadata'
+import { canAuthorizeRemoval, validateRemovalApproval } from './classification/policy'
+import { phaseOneSafetyPolicy } from './classification/safety-policy'
+import type { RemovalTarget } from './domain/operation'
 
 const input = createDescriptorInput({ id: 'test', filename: 'photo.jpg', source: 'opaque', mimeType: 'image/jpeg', size: 100 })
 
@@ -55,7 +58,7 @@ async function main() {
     }
     const plan = await boundary.planRemoval({ input, fieldIds: ['gps'], policy: 'quick' })
     assert.equal(plan.ok, true)
-    if (plan.ok) assert.deepEqual(plan.value.removableFieldIds, [])
+    if (plan.ok) { assert.deepEqual(plan.value.removableFieldIds, []); assert.equal(plan.value.requiresApproval, true) }
   })
 
   await test('no-op boundary returns typed unsupported execution and verification', async () => {
@@ -124,12 +127,24 @@ async function main() {
     if (!result.ok) assert.equal(result.error.code, 'LIMIT_EXCEEDED')
   })
 
-  await test('JPEG registry exposes inspection only', () => {
+  await test('removal policy authorizes only structural COM targets', () => {
+    const target: RemovalTarget = { id: 'jpeg-com-0', kind: 'jpeg-segment', marker: 0xfe, category: 'comment', classification: 'SAFE_TO_REMOVE', removable: true, reason: 'Recognized comment segment.' }
+    assert.equal(canAuthorizeRemoval(target, phaseOneSafetyPolicy), true)
+    assert.equal(phaseOneSafetyPolicy.preserveOriginal, true)
+    assert.equal(phaseOneSafetyPolicy.failClosed, true)
+    assert.equal(phaseOneSafetyPolicy.retainInMemoryOnly, true)
+    const plan = { id: 'plan-1', status: 'ready' as const, input: input.descriptor, targets: [target], removableTargetIds: [target.id], preservedTargetIds: [], warnings: [], requiresApproval: true as const, removableFieldIds: [], preservedFieldIds: [] }
+    assert.equal(validateRemovalApproval({ planId: 'plan-1', inputId: 'test', approvedTargetIds: [target.id], approvedAt: 1 }, plan), true)
+    assert.equal(validateRemovalApproval({ planId: 'stale', inputId: 'test', approvedTargetIds: [target.id], approvedAt: 1 }, plan), false)
+    assert.equal(validateRemovalApproval({ planId: 'plan-1', inputId: 'other', approvedTargetIds: [target.id], approvedAt: 1 }, plan), false)
+  })
+
+  await test('JPEG registry exposes inspection and plan-only removal', () => {
     const registry = createFormatAdapterRegistry()
     assert.equal(registry.register(jpegAdapter).ok, true)
     assert.equal(registry.resolveInspection(input.descriptor).ok, true)
-    assert.equal(registry.resolve(input.descriptor, 'remove').ok, false)
-    assert.equal(jpegAdapter.capability.operations.length, 1)
+    assert.equal(registry.resolve(input.descriptor, 'remove').ok, true)
+    assert.deepEqual(jpegAdapter.capability.operations, ['inspect', 'remove'])
   })
 
   console.log('Phase 1/2 contract tests passed: 10')

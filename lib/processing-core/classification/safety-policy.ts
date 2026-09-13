@@ -1,24 +1,44 @@
 import type { Operation } from '../domain/operation'
 
 /** Phase 1 defaults are fail-closed; real limits must be selected before parsing. */
+export type RemovalScope = 'jpeg-com'
+
 export type SafetyPolicy = Readonly<{
   maxInputBytes: number
   maxOutputBytes: number
   maxFiles: number
+  maxSegments: number
+  maxMetadataSegmentBytes: number
+  maxTotalMetadataBytes: number
   allowedOperations: readonly Operation[]
+  allowedRemovalScopes: readonly RemovalScope[]
   allowOutput: boolean
   preserveOriginal: true
   failClosed: true
   retainInMemoryOnly: true
+  preserveProtectedSegments: true
+  preserveUnknownSegments: true
+  requireIndependentVerification: true
 }>
 
-export const phaseOneSafetyPolicy: SafetyPolicy = Object.freeze({
-  maxInputBytes: 0,
-  maxOutputBytes: 0,
+export const structuralLimits = Object.freeze({
+  maxInputBytes: 32 * 1024 * 1024,
+  maxOutputBytes: 32 * 1024 * 1024,
   maxFiles: 1,
+  maxSegments: 65_536,
+  maxMetadataSegmentBytes: 16 * 1024 * 1024,
+  maxTotalMetadataBytes: 32 * 1024 * 1024,
+} as const)
+
+export const phaseOneSafetyPolicy: SafetyPolicy = Object.freeze({
+  ...structuralLimits,
   allowedOperations: Object.freeze(['inspect', 'remove', 'edit', 'verify'] as Operation[]),
+  allowedRemovalScopes: Object.freeze(['jpeg-com'] as RemovalScope[]),
   allowOutput: false,
   preserveOriginal: true,
   failClosed: true,
   retainInMemoryOnly: true,
+  preserveProtectedSegments: true,
+  preserveUnknownSegments: true,
+  requireIndependentVerification: true,
 })

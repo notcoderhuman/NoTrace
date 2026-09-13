@@ -19,13 +19,13 @@ export function createNoopBoundary(_registry?: FormatAdapterRegistry): LocalProc
       return { ok: true, value: { kind: 'inspection', status: 'unsupported', input: inputSummary(input), format: { mimeType: input.descriptor.mimeType, state: 'unknown' }, fields: [], warnings: ['Phase 1 does not read or inspect file bytes.'], analyzed: false } }
     },
     async planRemoval(_request: RemovalRequest): Promise<BoundaryResult<RemovalPlan>> {
-      return { ok: true, value: { status: 'unsupported', removableFieldIds: [], preservedFieldIds: [], warnings: ['No metadata has been inspected; uncertain fields are preserved.'] } }
+      return { ok: true, value: { id: 'noop-plan', status: 'unsupported', input: _request.input.descriptor, targets: [], removableTargetIds: [], preservedTargetIds: [], warnings: ['No metadata has been inspected; uncertain fields are preserved.'], requiresApproval: true, removableFieldIds: [], preservedFieldIds: [] } }
     },
     async execute(_request: ProcessingRequest | EditRequest): Promise<BoundaryResult<ProcessingResult>> {
       return unsupported('Phase 1 does not modify or create media files.')
     },
     async verify(_input: LocalInput): Promise<BoundaryResult<VerificationResult>> {
-      return { ok: true, value: { kind: 'verification', status: 'unsupported', input: _input.descriptor, outputCreated: false, checks: [], warnings: ['Phase 1 does not create output artifacts to verify.'] } }
+      return { ok: true, value: { kind: 'verification', status: 'unsupported', input: _input.descriptor, outputCreated: false, checks: [], removedTargetIds: [], preservedTargetIds: [], warnings: ['Phase 1 does not create output artifacts to verify.'] } }
     },
   }
 }

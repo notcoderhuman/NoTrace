@@ -103,7 +103,7 @@ async function main() {
     for (const forbidden of ['fetch(', 'XMLHttpRequest', 'WebSocket', 'sendBeacon', 'node:fs', 'from \'react\'', 'from \'next/']) assert.equal(source.includes(forbidden), false, forbidden)
   })
 
-  assert.equal(jpegAdapter.capability.operations.join(','), 'inspect')
+  assert.deepEqual(jpegAdapter.capability.operations, ['inspect', 'remove'])
   console.log('Phase 3A inspection tests passed: 8')
 }
 

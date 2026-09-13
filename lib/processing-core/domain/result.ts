@@ -1,12 +1,22 @@
 import type { FileIdentity } from './file'
 import type { LocalInputDescriptor } from './input'
+import type { OutputArtifact } from './artifact'
+
+export type VerificationCheck = Readonly<{
+  id: string
+  name: string
+  status: 'not-run' | 'passed' | 'failed'
+}>
 
 export type VerificationResult = Readonly<{
   kind: 'verification'
   status: 'success' | 'partial' | 'failed' | 'unsupported'
   input: LocalInputDescriptor
-  outputCreated: false
-  checks: readonly Readonly<{ name: string; status: 'not-run' | 'passed' | 'failed' }>[]
+  outputCreated: boolean
+  output?: OutputArtifact
+  checks: readonly VerificationCheck[]
+  removedTargetIds: readonly string[]
+  preservedTargetIds: readonly string[]
   warnings: readonly string[]
 }>
 

@@ -23,7 +23,7 @@ export function createInspectionBoundary(registry: FormatAdapterRegistry): Local
       return resolved.value.inspect(input)
     },
     async planRemoval(_request: RemovalRequest): Promise<BoundaryResult<RemovalPlan>> {
-      return { ok: false, error: { code: 'UNSUPPORTED', message: 'Removal is not available in inspection-only mode.' } }
+      return { ok: false, error: { code: 'UNSUPPORTED', message: 'Removal planning is not available in inspection-only mode.' } }
     },
     async execute(_request: ProcessingRequest | EditRequest): Promise<BoundaryResult<ProcessingResult>> {
       return { ok: false, error: { code: 'UNSUPPORTED', message: 'Execution is not available in inspection-only mode.' } }
