@@ -18,7 +18,7 @@ export type Report = Readonly<{
   warnings: readonly string[]
 }>
 
-export type BoundaryErrorCode = 'INVALID_INPUT' | 'UNSUPPORTED' | 'PROCESSING_FAILED' | 'VERIFICATION_FAILED'
+export type BoundaryErrorCode = 'INVALID_INPUT' | 'UNSUPPORTED' | 'LIMIT_EXCEEDED' | 'CANCELLED' | 'PROCESSING_FAILED' | 'VERIFICATION_FAILED'
 
 export type BoundaryError = Readonly<{
   code: BoundaryErrorCode

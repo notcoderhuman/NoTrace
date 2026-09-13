@@ -1,6 +1,8 @@
 import type { LocalInputDescriptor } from '../domain/input'
 import type { Operation } from '../domain/operation'
 import type { BoundaryResult } from '../domain/result'
+import type { LocalInput } from '../domain/input'
+import type { InspectionResult } from '../domain/metadata'
 
 export type AdapterCapability = Readonly<{
   extensions: readonly string[]
@@ -11,6 +13,7 @@ export type AdapterCapability = Readonly<{
 export type FormatAdapter = Readonly<{
   id: string
   capability: AdapterCapability
+  inspect?: (input: LocalInput) => Promise<BoundaryResult<InspectionResult>>
 }>
 
 export interface FormatAdapterRegistry {
