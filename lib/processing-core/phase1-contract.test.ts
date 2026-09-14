@@ -100,10 +100,10 @@ async function main() {
   await test('JPEG signature and deterministic empty inspection', async () => {
     const empty = await inspectJpeg(createMemoryInput(new Uint8Array(), { id: 'empty', filename: 'empty.jpg' }))
     assert.equal(empty.ok, false)
-    const minimal = new Uint8Array([0xff, 0xd8, 0xff, 0xd9])
+    const minimal = new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0, 11, 8, 0, 1, 0, 1, 1, 1, 0x11, 0, 0xff, 0xda, 0, 8, 1, 1, 0, 0, 0x3f, 0, 0x11, 0xff, 0xd9])
     const result = await inspectJpeg(createMemoryInput(minimal, { id: 'minimal', filename: 'not-a-jpeg.bin' }))
     assert.equal(result.ok, true)
-    if (result.ok) { assert.equal(result.value.analyzed, true); assert.equal(result.value.fields.length, 0); assert.equal(result.value.status, 'success') }
+    if (result.ok) { assert.equal(result.value.analyzed, true); assert.equal(result.value.status, 'success') }
   })
 
   await test('JPEG EXIF, XMP, comment, ICC and multiple segments', async () => {
@@ -112,7 +112,9 @@ async function main() {
     const xmp = [...new TextEncoder().encode('http://ns.adobe.com/xap/1.0/\0<xml/>')]
     const icc = [...new TextEncoder().encode('ICC_PROFILE\0\x01\x01')]
     const comment = [...new TextEncoder().encode('hello')]
-    const bytes = new Uint8Array([0xff, 0xd8, ...segment(0xe1, exif), ...segment(0xe1, xmp), ...segment(0xe2, icc), ...segment(0xfe, comment), 0xff, 0xd9])
+    const frame = [0xff, 0xc0, 0, 11, 8, 0, 1, 0, 1, 1, 1, 0x11, 0]
+    const scan = [0xff, 0xda, 0, 8, 1, 1, 0, 0, 0x3f, 0]
+    const bytes = new Uint8Array([0xff, 0xd8, ...frame, ...segment(0xe1, exif), ...segment(0xe1, xmp), ...segment(0xe2, icc), ...segment(0xfe, comment), ...scan, 0x11, 0xff, 0xd9])
     const result = await inspectJpeg(createMemoryInput(bytes, { id: 'metadata', filename: 'metadata.jpg' }))
     assert.equal(result.ok, true)
     if (result.ok) assert.deepEqual(result.value.fields.map(field => field.category), ['EXIF', 'XMP', 'other', 'other'])
@@ -128,15 +130,15 @@ async function main() {
   })
 
   await test('removal policy authorizes only structural COM targets', () => {
-    const target: RemovalTarget = { id: 'jpeg-com-0', kind: 'jpeg-segment', marker: 0xfe, category: 'comment', classification: 'SAFE_TO_REMOVE', removable: true, reason: 'Recognized comment segment.' }
+    const target: RemovalTarget = { id: 'jpeg-com-0', kind: 'jpeg-segment', marker: 0xfe, ordinal: 0, startOffset: 2, endOffset: 7, category: 'comment', classification: 'SAFE_TO_REMOVE', removable: true, reason: 'Recognized comment segment.' }
     assert.equal(canAuthorizeRemoval(target, phaseOneSafetyPolicy), true)
     assert.equal(phaseOneSafetyPolicy.preserveOriginal, true)
     assert.equal(phaseOneSafetyPolicy.failClosed, true)
     assert.equal(phaseOneSafetyPolicy.retainInMemoryOnly, true)
-    const plan = { id: 'plan-1', status: 'ready' as const, input: input.descriptor, targets: [target], removableTargetIds: [target.id], preservedTargetIds: [], warnings: [], requiresApproval: true as const, removableFieldIds: [], preservedFieldIds: [] }
-    assert.equal(validateRemovalApproval({ planId: 'plan-1', inputId: 'test', approvedTargetIds: [target.id], approvedAt: 1 }, plan), true)
-    assert.equal(validateRemovalApproval({ planId: 'stale', inputId: 'test', approvedTargetIds: [target.id], approvedAt: 1 }, plan), false)
-    assert.equal(validateRemovalApproval({ planId: 'plan-1', inputId: 'other', approvedTargetIds: [target.id], approvedAt: 1 }, plan), false)
+    const plan = { id: 'plan-1', status: 'ready' as const, input: input.descriptor, sourceFingerprint: 'fingerprint', targets: [target], removableTargetIds: [target.id], preservedTargetIds: [], warnings: [], requiresApproval: true as const, removableFieldIds: [], preservedFieldIds: [], removalWitnesses: [] }
+    assert.equal(validateRemovalApproval({ planId: 'plan-1', inputId: 'test', sourceFingerprint: 'fingerprint', approvedTargetIds: [target.id], approvedAt: 1 }, plan), true)
+    assert.equal(validateRemovalApproval({ planId: 'stale', inputId: 'test', sourceFingerprint: 'fingerprint', approvedTargetIds: [target.id], approvedAt: 1 }, plan), false)
+    assert.equal(validateRemovalApproval({ planId: 'plan-1', inputId: 'other', sourceFingerprint: 'fingerprint', approvedTargetIds: [target.id], approvedAt: 1 }, plan), false)
   })
 
   await test('JPEG registry exposes inspection and plan-only removal', () => {

@@ -16,16 +16,32 @@ export type RemovalTarget = Readonly<{
   id: string
   kind: 'jpeg-segment'
   marker: number
+  ordinal: number
+  startOffset: number
+  endOffset: number
   category: RemovalTargetCategory
   classification: SafetyClassification
   removable: boolean
   reason: string
 }>
 
+export type RemovalWitness = Readonly<{
+  sourceFingerprint: string
+  targetId: string
+  ordinal: number
+  startOffset: number
+  endOffset: number
+  marker: number
+  rangeLength: number
+}>
+
+export type RemovalTraceEntry = RemovalWitness
+
 export type RemovalPlan = Readonly<{
   id: string
   status: 'ready' | 'unsupported' | 'unknown'
   input: LocalInputDescriptor
+  sourceFingerprint: string
   targets: readonly RemovalTarget[]
   removableTargetIds: readonly string[]
   preservedTargetIds: readonly string[]
@@ -33,11 +49,13 @@ export type RemovalPlan = Readonly<{
   requiresApproval: true
   removableFieldIds: readonly string[]
   preservedFieldIds: readonly string[]
+  removalWitnesses: readonly RemovalWitness[]
 }>
 
 export type RemovalApproval = Readonly<{
   planId: string
   inputId: string
+  sourceFingerprint: string
   approvedTargetIds: readonly string[]
   approvedAt: number
 }>
@@ -64,6 +82,7 @@ export type ProcessingResult = Readonly<{
   input: Readonly<{ filename: string; mimeType?: string; size?: number }>
   output?: Readonly<{ filename: string; created: true; artifact: OutputArtifact }>
   outputVerification: 'not-run' | 'passed'
+  removalTrace?: readonly RemovalTraceEntry[]
   removedTargetIds: readonly string[]
   preservedTargetIds: readonly string[]
   warnings: readonly string[]

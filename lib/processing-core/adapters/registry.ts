@@ -14,9 +14,11 @@ export type AdapterCapability = Readonly<{
 export type FormatAdapter = Readonly<{
   id: string
   capability: AdapterCapability
-  inspect?: (input: LocalInput) => Promise<BoundaryResult<InspectionResult>>
+  inspect?: (input: LocalInput, signal?: AbortSignal) => Promise<BoundaryResult<InspectionResult>>
   planRemoval?: (input: LocalInput, targetIds: readonly string[], policy: string, signal?: AbortSignal) => Promise<BoundaryResult<RemovalPlan>>
   remove?: (input: LocalInput, plan: RemovalPlan, approval: import('../domain/operation').RemovalApproval, signal?: AbortSignal) => Promise<BoundaryResult<ProcessingResult>>
+  verifierId?: string
+  role?: 'transformer' | 'verifier'
   verifyOutput?: (input: LocalInput, output: import('../domain/artifact').OutputArtifact, plan: RemovalPlan, approval: import('../domain/operation').RemovalApproval, signal?: AbortSignal) => Promise<BoundaryResult<import('../domain/result').VerificationResult>>
 }>
 
@@ -26,6 +28,7 @@ export interface FormatAdapterRegistry {
   resolveInspection(input: LocalInputDescriptor): BoundaryResult<FormatAdapter>
   resolveRemovalPlan(input: LocalInputDescriptor): BoundaryResult<FormatAdapter>
   resolveRemoval(input: LocalInputDescriptor): BoundaryResult<FormatAdapter>
+  resolveVerifier(input: LocalInputDescriptor, executorId?: string): BoundaryResult<FormatAdapter>
   list(): readonly FormatAdapter[]
 }
 
@@ -58,6 +61,10 @@ export function createFormatAdapterRegistry(): FormatAdapterRegistry {
     resolveRemoval(input) {
       const adapter = adapters.find(candidate => matches(candidate, input, 'remove') && typeof candidate.remove === 'function')
       return adapter ? { ok: true, value: adapter } : { ok: false, error: { code: 'UNSUPPORTED', message: 'No removal execution adapter is registered for this input.' } }
+    },
+    resolveVerifier(input, executorId) {
+      const adapter = adapters.find(candidate => matches(candidate, input, 'verify') && candidate.role === 'verifier' && typeof candidate.verifyOutput === 'function' && candidate.id !== executorId)
+      return adapter ? { ok: true, value: adapter } : { ok: false, error: { code: 'UNSUPPORTED', message: 'No independent verification adapter is registered for this input.' } }
     },
     list: () => adapters.slice(),
   }

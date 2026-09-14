@@ -5,10 +5,22 @@ import { createPlanningBoundary } from './planning-boundary'
 
 const segment = (marker: number, payload: number[]) => [0xff, marker, (payload.length + 2) >> 8, (payload.length + 2) & 0xff, ...payload]
 const text = (value: string) => [...new TextEncoder().encode(value)]
-const bytes = new Uint8Array([0xff, 0xd8, ...segment(0xfe, text('one')), ...segment(0xfe, text('two')), ...segment(0xe1, [...text('Exif\0\0'), 0x49, 0x49]), ...segment(0xe2, [...text('ICC_PROFILE\0'), 1]), 0xff, 0xd9])
+const bytes = new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0, 11, 8, 0, 1, 0, 1, 1, 1, 0x11, 0, ...segment(0xfe, text('one')), ...segment(0xfe, text('two')), ...segment(0xe1, [...text('Exif\0\0'), 0x49, 0x49]), ...segment(0xe2, [...text('ICC_PROFILE\0'), 1]), 0xff, 0xda, 0, 8, 1, 1, 0, 0, 0x3f, 0, 0x11, 0xff, 0xd9])
 
 async function test(name: string, fn: () => void | Promise<void>) { await fn(); console.log(`PASS ${name}`) }
 async function main() {
+  await test('supports provider discovery followed by exact COM target authorization', async () => {
+    const input = createMemoryFileInput(bytes, { id: 'input-discovery', filename: 'photo.jpg' })
+    const boundary = createPlanningBoundary(createDefaultFormatAdapterRegistry())
+    const discovery = await boundary.planRemoval({ input, fieldIds: [], policy: 'quick' })
+    assert.equal(discovery.ok, true)
+    if (discovery.ok) {
+      const targetIds = discovery.value.targets.filter(target => target.category === 'comment' && target.removable && target.classification === 'SAFE_TO_REMOVE').map(target => target.id)
+      const plan = await boundary.planRemoval({ input, fieldIds: targetIds, policy: 'quick' })
+      assert.equal(plan.ok, true)
+      if (plan.ok) assert.deepEqual(plan.value.removableTargetIds, ['jpeg-comment-0', 'jpeg-comment-1'])
+    }
+  })
   await test('plans only requested COM targets and preserves everything else', async () => {
     const input = createMemoryFileInput(bytes, { id: 'input-1', filename: 'photo.jpg' })
     const boundary = createPlanningBoundary(createDefaultFormatAdapterRegistry())
@@ -41,6 +53,6 @@ async function main() {
     const malformed = await boundary.planRemoval({ input: createMemoryFileInput(new Uint8Array([0xff, 0xd8]), { id: 'bad', filename: 'bad.jpg' }), fieldIds: [], policy: 'quick' })
     assert.equal(malformed.ok, false)
   })
-  console.log('Removal planning tests passed: 3')
+  console.log('Removal planning tests passed: 4')
 }
 void main()

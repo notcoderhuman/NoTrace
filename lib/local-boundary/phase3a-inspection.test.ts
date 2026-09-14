@@ -9,7 +9,7 @@ function segment(marker: number, payload: number[]) {
   return [0xff, marker, (payload.length + 2) >> 8, (payload.length + 2) & 0xff, ...payload]
 }
 
-const jpegBytes = new Uint8Array([0xff, 0xd8, ...segment(0xe1, [...new TextEncoder().encode('Exif\0\0'), 0x49, 0x49]), 0xff, 0xd9])
+const jpegBytes = new Uint8Array([0xff, 0xd8, 0xff, 0xc0, 0, 11, 8, 0, 1, 0, 1, 1, 1, 0x11, 0, ...segment(0xe1, [...new TextEncoder().encode('Exif\0\0'), 0x49, 0x49]), 0xff, 0xda, 0, 8, 1, 1, 0, 0, 0x3f, 0, 0x11, 0xff, 0xd9])
 
 function browserFile(bytes: Uint8Array, name = 'photo.jpg', type = 'image/jpeg') {
   return new File([bytes], name, { type })

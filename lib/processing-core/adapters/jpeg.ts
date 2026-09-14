@@ -4,7 +4,7 @@ import type { BoundaryResult } from '../domain/result'
 import { createMemoryArtifact } from '../domain/artifact'
 import { validateRemovalApproval, canAuthorizeRemoval } from '../classification/policy'
 import type { FormatAdapter } from './registry'
-import type { ProcessingResult, RemovalApproval, RemovalPlan, RemovalTarget } from '../domain/operation'
+import type { ProcessingResult, RemovalApproval, RemovalPlan, RemovalTarget, RemovalWitness, RemovalTraceEntry } from '../domain/operation'
 import { phaseOneSafetyPolicy, type SafetyPolicy, structuralLimits } from '../classification/safety-policy'
 
 export const JPEG_MAX_INSPECTION_BYTES = structuralLimits.maxInputBytes
@@ -28,12 +28,20 @@ export type JpegSegmentInventory = Readonly<{
 export type JpegStructuralInventory = Readonly<{
   segments: readonly JpegSegmentInventory[]
   inputSize: number
+  sourceFingerprint: string
 }>
 const SOI = 0xffd8
 const EOI = 0xd9
 const APP1 = 0xe1
 const APP2 = 0xe2
 const COM = 0xfe
+
+async function fingerprint(bytes: Uint8Array, signal?: AbortSignal): Promise<BoundaryResult<string>> {
+  if (signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'JPEG fingerprinting was cancelled.' } }
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  if (signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'JPEG fingerprinting was cancelled.' } }
+  return { ok: true, value: Array.from(new Uint8Array(digest), value => value.toString(16).padStart(2, '0')).join('') }
+}
 
 function ascii(bytes: Uint8Array, start: number, length: number) {
   return new TextDecoder().decode(bytes.slice(start, start + length))
@@ -64,24 +72,45 @@ function segmentCategory(marker: number, payload: Uint8Array): { kind: JpegSegme
   return { kind: 'app', removable: false, reason: 'Unrecognized JPEG structure is preserved.' }
 }
 
-function inspectSegments(bytes: Uint8Array): BoundaryResult<{ fields: readonly MetadataField[]; inventory: JpegStructuralInventory }> {
+function findScanMarker(bytes: Uint8Array, start: number, signal?: AbortSignal): BoundaryResult<{ markerOffset: number; marker: number }> {
+  let offset = start
+  while (offset < bytes.length) {
+    if (signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'JPEG parsing was cancelled.' } }
+    if (bytes[offset] !== 0xff) { offset++; continue }
+    const markerOffset = offset
+    while (offset < bytes.length && bytes[offset] === 0xff) offset++
+    if (offset >= bytes.length) return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Truncated JPEG scan data.' } }
+    const marker = bytes[offset]
+    if (marker === 0x00 || (marker >= 0xd0 && marker <= 0xd7)) { offset++; continue }
+    return { ok: true, value: { markerOffset, marker } }
+  }
+  return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'JPEG scan data has no terminating marker.' } }
+}
+
+function inspectSegments(bytes: Uint8Array, signal?: AbortSignal): BoundaryResult<{ fields: readonly MetadataField[]; inventory: JpegStructuralInventory }> {
   if (bytes.length < 2 || (bytes[0] << 8 | bytes[1]) !== SOI) return { ok: false, error: { code: 'UNSUPPORTED', message: 'Input is not a JPEG stream.' } }
   const fields: MetadataField[] = []
   const segments: JpegSegmentInventory[] = [{ index: 0, kind: 'soi', marker: SOI, startOffset: 0, endOffset: 2, payloadLength: 0 }]
   let offset = 2
   let sawEoi = false
+  let sawFrame = false
+  let sawScan = false
+  let progressive = false
+  let frameComponents = new Map<number, { dc: boolean; ac: boolean }>()
   let metadataBytes = 0
   const counts = new Map<string, number>()
   while (offset < bytes.length) {
+    if (signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'JPEG parsing was cancelled.' } }
     if (segments.length >= JPEG_MAX_SEGMENTS) return { ok: false, error: { code: 'LIMIT_EXCEEDED', message: 'JPEG segment count exceeds the structural limit.' } }
     const startOffset = offset
     if (bytes[offset] !== 0xff) return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Malformed JPEG marker prefix.' } }
     while (offset < bytes.length && bytes[offset] === 0xff) offset++
     if (offset >= bytes.length) return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Truncated JPEG marker.' } }
     const marker = bytes[offset++]
-    if (marker === 0x00) return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Invalid JPEG marker.' } }
+    if (marker === 0x00 || marker === 0x01 || (marker >= 0x02 && marker <= 0xbf) || marker === 0xd8) return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Illegal JPEG marker.' } }
     if (marker === EOI) { sawEoi = true; segments.push({ index: segments.length, kind: 'eoi', marker, startOffset, endOffset: offset, payloadLength: 0 }); break }
-    if (marker >= 0xd0 && marker <= 0xd9) { segments.push({ index: segments.length, kind: 'image', marker, startOffset, endOffset: offset, payloadLength: 0 }); continue }
+    if (marker >= 0xd0 && marker <= 0xd7) { segments.push({ index: segments.length, kind: 'image', marker, startOffset, endOffset: offset, payloadLength: 0 }); continue }
+    if (marker === 0xd9) { sawEoi = true; segments.push({ index: segments.length, kind: 'eoi', marker, startOffset, endOffset: offset, payloadLength: 0 }); break }
     if (offset + 2 > bytes.length) return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Truncated JPEG segment length.' } }
     const length = (bytes[offset] << 8) | bytes[offset + 1]
     if (length < 2 || offset + length > bytes.length) return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'JPEG segment exceeds input bounds.' } }
@@ -89,11 +118,50 @@ function inspectSegments(bytes: Uint8Array): BoundaryResult<{ fields: readonly M
     const payloadLength = length - 2
     if (payloadLength > JPEG_MAX_METADATA_SEGMENT_BYTES && marker >= 0xe0 && marker <= 0xef) return { ok: false, error: { code: 'LIMIT_EXCEEDED', message: 'JPEG metadata segment exceeds the structural limit.' } }
     const payload = bytes.subarray(payloadStart, offset + length)
+    if (marker >= 0xc0 && marker <= 0xcf && marker !== 0xc4 && marker !== 0xc8 && marker !== 0xcc) {
+      const precision = payload[0]
+      const height = (payload[1] << 8) | payload[2]
+      const width = (payload[3] << 8) | payload[4]
+      const componentCount = payload[5]
+      const isProgressive = marker >= 0xc2 && marker <= 0xc3
+      const expectedLength = 6 + componentCount * 3
+      if (payloadLength < 6 || precision !== 8 || width === 0 || height === 0 || componentCount < 1 || componentCount > 4 || payloadLength !== expectedLength) return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Malformed JPEG frame header.' } }
+      const components = new Map<number, { dc: boolean; ac: boolean }>()
+      for (let index = 0; index < componentCount; index++) {
+        const base = 6 + index * 3
+        const id = payload[base]
+        const sampling = payload[base + 1]
+        const quant = payload[base + 2]
+        if (components.has(id) || id === 0 || (sampling >> 4) === 0 || (sampling & 0x0f) === 0 || (sampling >> 4) > 4 || (sampling & 0x0f) > 4 || quant > 3) return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Invalid JPEG frame component.' } }
+        components.set(id, { dc: false, ac: false })
+      }
+      frameComponents = components
+      progressive = isProgressive
+      sawFrame = true
+    }
+    if (marker === 0xda) {
+      const count = payload[0]
+      const expectedLength = 1 + count * 2 + 3
+      if (!sawFrame || count < 1 || count > frameComponents.size || payloadLength !== expectedLength) return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Malformed JPEG scan header.' } }
+      const seen = new Set<number>()
+      for (let index = 0; index < count; index++) {
+        const base = 1 + index * 2
+        const component = payload[base]
+        const tables = payload[base + 1]
+        if (seen.has(component) || !frameComponents.has(component) || (tables >> 4) > 3 || (tables & 0x0f) > 3) return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Invalid JPEG scan component.' } }
+        seen.add(component)
+      }
+      const spectralStart = payload[1 + count * 2]
+      const spectralEnd = payload[2 + count * 2]
+      const approximation = payload[3 + count * 2]
+      if (spectralStart > 63 || spectralEnd > 63 || spectralStart > spectralEnd || (approximation >> 4) > 13 || (approximation & 0x0f) > 13 || (!progressive && (spectralStart !== 0 || spectralEnd !== 63 || approximation !== 0))) return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Invalid JPEG scan parameters.' } }
+      sawScan = true
+    }
     const classified = segmentCategory(marker, payload)
     const ordinalKey = classified.category ?? classified.kind
     const ordinal = counts.get(ordinalKey) ?? 0
     counts.set(ordinalKey, ordinal + 1)
-    const target = classified.category && classified.classification ? { id: `jpeg-${classified.category === 'unknown' ? `app-${marker.toString(16)}` : classified.category}-${ordinal}`, kind: 'jpeg-segment' as const, marker, category: classified.category, classification: classified.classification, removable: classified.removable, reason: classified.reason ?? 'Preserved by structural policy.' } : undefined
+    const target = classified.category && classified.classification ? { id: `jpeg-${classified.category === 'unknown' ? `app-${marker.toString(16)}` : classified.category}-${ordinal}`, kind: 'jpeg-segment' as const, marker, category: classified.category, classification: classified.classification, removable: classified.removable, reason: classified.reason ?? 'Preserved by structural policy.', ordinal, startOffset, endOffset: offset + length } : undefined
     segments.push({ index: segments.length, kind: classified.kind, marker, startOffset, endOffset: offset + length, payloadLength, target })
     if (marker >= 0xe0 && marker <= 0xef) metadataBytes += payloadLength
     if (metadataBytes > JPEG_MAX_TOTAL_METADATA_BYTES) return { ok: false, error: { code: 'LIMIT_EXCEEDED', message: 'JPEG metadata exceeds the structural limit.' } }
@@ -102,23 +170,37 @@ function inspectSegments(bytes: Uint8Array): BoundaryResult<{ fields: readonly M
     else if (marker === APP2 && ascii(payload, 0, 12) === 'ICC_PROFILE\0') fields.push(field('icc-profile', 'ICC color profile', 'other', 'Present', 'PROTECTED'))
     else if (marker === COM) fields.push(field(`comment-${fields.length}`, 'JPEG comment', 'other', `Present (${payload.length} bytes)`, 'UNKNOWN'))
     offset += length
+    if (marker === 0xda) {
+      const scan = findScanMarker(bytes, offset, signal)
+      if (!scan.ok) return scan
+      const current = segments[segments.length - 1]
+      segments[segments.length - 1] = { ...current, endOffset: scan.value.markerOffset }
+      offset = scan.value.markerOffset
+    }
   }
   if (!sawEoi) return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'JPEG stream has no EOI marker.' } }
-  return { ok: true, value: { fields, inventory: { segments, inputSize: bytes.byteLength } } }
+  if (!sawFrame || !sawScan) return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'JPEG stream has no valid frame and scan.' } }
+  if (offset !== bytes.length) return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'JPEG stream contains trailing bytes after EOI.' } }
+  return { ok: true, value: { fields, inventory: { segments, inputSize: bytes.byteLength, sourceFingerprint: '' } } }
 }
 
-export async function inspectJpeg(input: LocalInput): Promise<BoundaryResult<InspectionResult>> {
+export async function inspectJpeg(input: LocalInput, signal?: AbortSignal): Promise<BoundaryResult<InspectionResult>> {
   const descriptor = input.descriptor
   if (descriptor.size !== undefined && descriptor.size > JPEG_MAX_INSPECTION_BYTES) return { ok: false, error: { code: 'LIMIT_EXCEEDED', message: 'JPEG input exceeds the inspection size limit.' } }
-  const bytes = await input.read(undefined)
+  const bytes = await input.read(undefined, signal)
   if (!bytes.ok) return bytes
   if (bytes.value.byteLength > JPEG_MAX_INSPECTION_BYTES) return { ok: false, error: { code: 'LIMIT_EXCEEDED', message: 'JPEG input exceeds the inspection size limit.' } }
-  const parsed = inspectSegments(bytes.value)
+  const parsed = inspectSegments(bytes.value, signal)
   if (!parsed.ok) return parsed
   return { ok: true, value: { kind: 'inspection', status: 'success', input: { filename: descriptor.filename, mimeType: descriptor.mimeType, size: descriptor.size ?? bytes.value.byteLength }, format: { extension: descriptor.filename.split('.').pop()?.toLowerCase(), mimeType: 'image/jpeg', state: 'supported' }, fields: parsed.value.fields, warnings: parsed.value.fields.length ? [] : ['No supported metadata segments were found.'], analyzed: true } }
 }
 
-export function createJpegRemovalPlan(input: LocalInput, inventory: JpegStructuralInventory, requestedTargetIds: readonly string[], policy: SafetyPolicy = phaseOneSafetyPolicy): BoundaryResult<RemovalPlan> {
+export async function createJpegRemovalPlan(input: LocalInput, inventory: JpegStructuralInventory, requestedTargetIds: readonly string[], policy: SafetyPolicy = phaseOneSafetyPolicy): Promise<BoundaryResult<RemovalPlan>> {
+  const source = await input.read()
+  if (!source.ok) return source
+  const sourceHash = await fingerprint(source.value)
+  if (!sourceHash.ok) return sourceHash
+  if (inventory.sourceFingerprint && inventory.sourceFingerprint !== sourceHash.value) return { ok: false, error: { code: 'INVALID_INPUT', message: 'JPEG source changed since structural planning.' } }
   const requested = new Set(requestedTargetIds)
   const targets = inventory.segments.flatMap(segment => segment.target ? [segment.target] : [])
   const removableTargetIds = targets.filter(target => canAuthorizeRemoval(target, policy) && requested.has(target.id)).map(target => target.id)
@@ -126,7 +208,7 @@ export function createJpegRemovalPlan(input: LocalInput, inventory: JpegStructur
   const unknownRequests = requestedTargetIds.filter(id => !targets.some(target => target.id === id))
   const warnings = targets.filter(target => !target.removable).map(target => `${target.id}: ${target.reason}`)
   if (unknownRequests.length) warnings.push(...unknownRequests.map(id => `${id}: target was not found in the structural inventory.`))
-  return { ok: true, value: { id: `plan-${input.descriptor.id}-${inventory.inputSize}`, status: removableTargetIds.length ? 'ready' : 'unsupported', input: input.descriptor, targets, removableTargetIds, preservedTargetIds, warnings, requiresApproval: true, removableFieldIds: [], preservedFieldIds: [] } }
+  return { ok: true, value: { id: `plan-${input.descriptor.id}-${inventory.inputSize}-${sourceHash.value.slice(0, 16)}`, status: removableTargetIds.length ? 'ready' : 'unsupported', input: input.descriptor, sourceFingerprint: sourceHash.value, targets, removableTargetIds, preservedTargetIds, warnings, requiresApproval: true, removableFieldIds: [], preservedFieldIds: [], removalWitnesses: targets.filter(target => removableTargetIds.includes(target.id)).map(target => ({ sourceFingerprint: sourceHash.value, targetId: target.id, ordinal: target.ordinal, startOffset: target.startOffset, endOffset: target.endOffset, marker: target.marker, rangeLength: target.endOffset - target.startOffset })) } }
 }
 
 export async function planJpegRemoval(input: LocalInput, requestedTargetIds: readonly string[], _policyName: string, signal?: AbortSignal): Promise<BoundaryResult<RemovalPlan>> {
@@ -151,10 +233,16 @@ export async function verifyJpegOutput(input: LocalInput, output: import('../dom
   if (output.id === input.descriptor.id) return failed('Output artifact identity is not distinct.', 'distinct-artifact')
   if (original.value.length !== originalAgain.value.length || original.value.some((value, index) => value !== originalAgain.value[index])) return failed('Original input changed during verification.', 'original-unchanged')
   if (generated.value.length > structuralLimits.maxOutputBytes) return failed('Output exceeds the configured size limit.', 'output-size')
-  const source = inspectSegments(original.value)
-  const observed = inspectSegments(generated.value)
+  const originalHash = await fingerprint(original.value, signal)
+  if (!originalHash.ok) return originalHash
+  if (originalHash.value !== plan.sourceFingerprint || approval.sourceFingerprint !== plan.sourceFingerprint) return failed('Original input does not match the approved source.', 'source-fingerprint')
+  if (new Set(approval.approvedTargetIds).size !== approval.approvedTargetIds.length) return failed('Approval contains duplicate targets.', 'approval-binding')
+  const source = inspectSegments(original.value, signal)
+  const observed = inspectSegments(generated.value, signal)
   if (!source.ok || !observed.ok) return failed('JPEG structure could not be independently verified.', 'segment-structure')
   const approved = new Set(approval.approvedTargetIds)
+  const witnesses = plan.removalWitnesses.filter(witness => approved.has(witness.targetId))
+  if (witnesses.length !== approved.size || witnesses.some(witness => witness.sourceFingerprint !== plan.sourceFingerprint || witness.rangeLength !== witness.endOffset - witness.startOffset)) return failed('Removal witness does not match the approved source.', 'target-witness')
   const sourceSegments = source.value.inventory.segments
   const outputSegments = observed.value.inventory.segments
   const approvedSegments = sourceSegments.filter(segment => segment.target && approved.has(segment.target.id))
@@ -168,12 +256,13 @@ export async function verifyJpegOutput(input: LocalInput, output: import('../dom
     if (expected.length !== actual.length || expected.some((value, byte) => value !== actual[byte])) return failed('A retained JPEG segment changed or moved.', 'retained-segments-preserved')
   }
   const preservedTargetIds = sourceSegments.flatMap(segment => segment.target && !approved.has(segment.target.id) ? [segment.target.id] : [])
-  return { ok: true, value: { kind: 'verification', status: 'success', input: input.descriptor, outputCreated: true, output, checks: verificationChecks('passed'), removedTargetIds: approvedSegments.map(segment => segment.target!.id), preservedTargetIds, warnings: [] } }
+  const removalTrace = witnesses.map(witness => ({ ...witness }))
+  return { ok: true, value: { kind: 'verification', status: 'success', input: input.descriptor, outputCreated: true, output, sourceFingerprint: source.value.inventory.sourceFingerprint, planId: plan.id, inputId: plan.input.id, approvedTargetIds: approval.approvedTargetIds, removalTrace, checks: verificationChecks('passed'), removedTargetIds: approvedSegments.map(segment => segment.target!.id), preservedTargetIds, warnings: [] } }
 }
 
 export async function removeJpegCom(input: LocalInput, plan: RemovalPlan, approval: RemovalApproval, signal?: AbortSignal): Promise<BoundaryResult<ProcessingResult>> {
   const invalid = { ok: false as const, error: { code: 'INVALID_INPUT' as const, message: 'Removal approval is invalid.' } }
-  if (!validateRemovalApproval(approval, plan) || approval.inputId !== input.descriptor.id || new Set(approval.approvedTargetIds).size !== approval.approvedTargetIds.length) return invalid
+  if (!validateRemovalApproval(approval, plan) || approval.inputId !== input.descriptor.id || approval.sourceFingerprint !== plan.sourceFingerprint || new Set(approval.approvedTargetIds).size !== approval.approvedTargetIds.length) return invalid
   const approved = new Set(approval.approvedTargetIds)
   const targets = plan.targets.filter(target => approved.has(target.id))
   if (!targets.length || targets.some(target => target.kind !== 'jpeg-segment' || target.category !== 'comment' || !canAuthorizeRemoval(target, phaseOneSafetyPolicy))) return invalid
@@ -181,15 +270,30 @@ export async function removeJpegCom(input: LocalInput, plan: RemovalPlan, approv
   const bytes = await input.read(undefined, signal)
   if (!bytes.ok) return bytes
   if (bytes.value.byteLength > JPEG_MAX_INSPECTION_BYTES) return { ok: false, error: { code: 'LIMIT_EXCEEDED', message: 'JPEG input exceeds the processing size limit.' } }
-  const parsed = inspectSegments(bytes.value)
+  const parsed = inspectSegments(bytes.value, signal)
   if (!parsed.ok) return parsed
+  const currentHash = await fingerprint(bytes.value, signal)
+  if (!currentHash.ok) return currentHash
+  if (currentHash.value !== plan.sourceFingerprint) return { ok: false, error: { code: 'INVALID_INPUT', message: 'JPEG source changed since approval.' } }
   const currentIds = new Set(parsed.value.inventory.segments.flatMap(segment => segment.target ? [segment.target.id] : []))
+  const witnesses = plan.removalWitnesses.filter(witness => approved.has(witness.targetId))
+  if (witnesses.length !== approved.size || witnesses.some(witness => {
+    const target = parsed.value.inventory.segments.find(segment => segment.target?.id === witness.targetId)?.target
+    return !target || target.ordinal !== witness.ordinal || target.startOffset !== witness.startOffset || target.endOffset !== witness.endOffset || target.marker !== witness.marker || witness.rangeLength !== witness.endOffset - witness.startOffset || witness.sourceFingerprint !== plan.sourceFingerprint
+  })) return invalid
   if (targets.some(target => !currentIds.has(target.id))) return invalid
   const ranges = new Set(targets.map(target => parsed.value.inventory.segments.find(segment => segment.target?.id === target.id)?.startOffset))
   const outputParts: Uint8Array[] = []
+  const removalTrace: RemovalTraceEntry[] = []
   let size = 0
   for (const segment of parsed.value.inventory.segments) {
-    if (ranges.has(segment.startOffset)) continue
+    if (ranges.has(segment.startOffset)) {
+      const target = segment.target
+      const witness = target ? plan.removalWitnesses.find(candidate => candidate.targetId === target.id) : undefined
+      if (!target || !witness || !approved.has(target.id) || witness.ordinal !== target.ordinal || witness.startOffset !== segment.startOffset || witness.endOffset !== segment.endOffset || witness.marker !== segment.marker || witness.rangeLength !== segment.endOffset - segment.startOffset || witness.sourceFingerprint !== plan.sourceFingerprint) return invalid
+      removalTrace.push({ sourceFingerprint: currentHash.value, targetId: target.id, ordinal: target.ordinal, startOffset: segment.startOffset, endOffset: segment.endOffset, marker: segment.marker, rangeLength: segment.endOffset - segment.startOffset })
+      continue
+    }
     if (signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Removal was cancelled.' } }
     const part = bytes.value.slice(segment.startOffset, segment.endOffset)
     size += part.byteLength
@@ -200,8 +304,9 @@ export async function removeJpegCom(input: LocalInput, plan: RemovalPlan, approv
   let offset = 0
   for (const part of outputParts) { output.set(part, offset); offset += part.byteLength }
   if (signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Removal was cancelled.' } }
+  if (removalTrace.length !== targets.length || removalTrace.some((trace, index) => trace.targetId !== targets[index].id)) return invalid
   const artifact = createMemoryArtifact(output, input.descriptor.filename.replace(/\.(?:jpe?g)$/i, '') + '_notrace.jpg')
-  return { ok: true, value: { kind: 'processing', status: 'success', input: { filename: input.descriptor.filename, mimeType: input.descriptor.mimeType, size: input.descriptor.size }, output: { filename: artifact.filename, created: true, artifact }, outputVerification: 'not-run', removedTargetIds: targets.map(target => target.id), preservedTargetIds: plan.targets.filter(target => !approved.has(target.id)).map(target => target.id), warnings: ['Output created in memory. Independent verification has not been performed.'] } }
+  return { ok: true, value: { kind: 'processing', status: 'success', input: { filename: input.descriptor.filename, mimeType: input.descriptor.mimeType, size: input.descriptor.size }, output: { filename: artifact.filename, created: true, artifact }, outputVerification: 'not-run', removalTrace, removedTargetIds: targets.map(target => target.id), preservedTargetIds: plan.targets.filter(target => !approved.has(target.id)).map(target => target.id), warnings: ['Output created in memory. Independent verification has not been performed.'] } }
 }
 
 export async function inspectJpegStructure(input: LocalInput, signal?: AbortSignal): Promise<BoundaryResult<JpegStructuralInventory>> {
@@ -211,12 +316,16 @@ export async function inspectJpegStructure(input: LocalInput, signal?: AbortSign
   const bytes = await input.read(undefined, signal)
   if (!bytes.ok) return bytes
   if (bytes.value.byteLength > JPEG_MAX_INSPECTION_BYTES) return { ok: false, error: { code: 'LIMIT_EXCEEDED', message: 'JPEG input exceeds the inspection size limit.' } }
-  const parsed = inspectSegments(bytes.value)
-  return parsed.ok ? { ok: true, value: parsed.value.inventory } : parsed
+  const parsed = inspectSegments(bytes.value, signal)
+  if (!parsed.ok) return parsed
+  const sourceHash = await fingerprint(bytes.value, signal)
+  if (!sourceHash.ok) return sourceHash
+  return { ok: true, value: { ...parsed.value.inventory, sourceFingerprint: sourceHash.value } }
 }
 
 export const jpegAdapter: FormatAdapter & { inspect: typeof inspectJpeg } = {
   id: 'jpeg-inspection',
+  role: 'transformer',
   capability: { extensions: ['jpg', 'jpeg'], mimeTypes: ['image/jpeg'], operations: ['inspect', 'remove'] },
   inspect: inspectJpeg,
   planRemoval: planJpegRemoval,

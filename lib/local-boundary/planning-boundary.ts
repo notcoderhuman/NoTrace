@@ -18,7 +18,7 @@ export function createPlanningBoundary(registry: FormatAdapterRegistry): LocalPr
       if (options?.signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Inspection was cancelled.' } }
       const resolved = registry.resolveInspection(input.descriptor)
       if (!resolved.ok || !resolved.value.inspect) return { ok: false, error: { code: 'UNSUPPORTED', message: 'No inspection adapter is available for this input.' } }
-      return resolved.value.inspect(input)
+      return resolved.value.inspect(input, options?.signal)
     },
     async planRemoval(request: RemovalRequest, options?: BoundaryOptions): Promise<BoundaryResult<RemovalPlan>> {
       const valid = validInput(request.input)

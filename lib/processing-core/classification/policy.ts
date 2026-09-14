@@ -21,7 +21,7 @@ export function canAuthorizeRemoval(target: RemovalTarget, policy: SafetyPolicy)
 }
 
 export function validateRemovalApproval(approval: RemovalApproval, plan: RemovalPlan): boolean {
-  if (approval.planId !== plan.id || approval.inputId !== plan.input.id || !Number.isSafeInteger(approval.approvedAt) || approval.approvedAt < 0) return false
+  if (approval.planId !== plan.id || approval.inputId !== plan.input.id || approval.sourceFingerprint !== plan.sourceFingerprint || !Number.isSafeInteger(approval.approvedAt) || approval.approvedAt < 0) return false
   const allowed = new Set(plan.removableTargetIds)
   return approval.approvedTargetIds.every(id => allowed.has(id))
 }

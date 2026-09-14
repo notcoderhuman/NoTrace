@@ -1,6 +1,9 @@
 import type { FileIdentity } from './file'
 import type { LocalInputDescriptor } from './input'
 import type { OutputArtifact } from './artifact'
+import type { RemovalTraceEntry } from './operation'
+
+export const JPEG_VERIFICATION_CHECK_IDS = ['output-soi', 'output-eoi', 'segment-structure', 'output-size', 'segment-count', 'approved-com-absent', 'preserved-targets-present', 'image-bytes-preserved', 'retained-segments-preserved', 'retained-order-preserved', 'no-unexpected-changes', 'original-unchanged', 'distinct-artifact'] as const
 
 export type VerificationCheck = Readonly<{
   id: string
@@ -14,6 +17,11 @@ export type VerificationResult = Readonly<{
   input: LocalInputDescriptor
   outputCreated: boolean
   output?: OutputArtifact
+  sourceFingerprint: string
+  planId: string
+  inputId: string
+  approvedTargetIds: readonly string[]
+  removalTrace: readonly RemovalTraceEntry[]
   checks: readonly VerificationCheck[]
   removedTargetIds: readonly string[]
   preservedTargetIds: readonly string[]

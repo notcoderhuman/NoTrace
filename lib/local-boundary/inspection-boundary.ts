@@ -20,7 +20,7 @@ export function createInspectionBoundary(registry: FormatAdapterRegistry): Local
       const resolved = registry.resolveInspection(input.descriptor)
       if (!resolved.ok) return resolved
       if (!resolved.value.inspect) return { ok: false, error: { code: 'UNSUPPORTED', message: 'The selected adapter cannot inspect this input.' } }
-      return resolved.value.inspect(input)
+      return resolved.value.inspect(input, options?.signal)
     },
     async planRemoval(_request: RemovalRequest): Promise<BoundaryResult<RemovalPlan>> {
       return { ok: false, error: { code: 'UNSUPPORTED', message: 'Removal planning is not available in inspection-only mode.' } }

@@ -25,11 +25,13 @@ type InspectionState =
   | { fileId: string; status: 'success'; result: InspectionResult }
   | { fileId: string; status: 'unsupported' | 'failed'; error: BoundaryError }
 
+type VerifiedOutputMetadata = Readonly<{ filename: string; created: true }>
+type VerifiedProcessingResult = Omit<ProcessingResult, 'output'> & { output: VerifiedOutputMetadata }
 type RemovalState =
   | { fileId: string; status: 'idle' | 'planning' }
   | { fileId: string; status: 'ready' | 'approval-pending'; plan: RemovalPlan; selectedTargetIds: readonly string[] }
   | { fileId: string; status: 'processing'; plan: RemovalPlan; selectedTargetIds: readonly string[] }
-  | { fileId: string; status: 'success'; result: ProcessingResult }
+  | { fileId: string; status: 'success'; result: VerifiedProcessingResult }
   | { fileId: string; status: 'unsupported' | 'failed'; error: BoundaryError }
 
 type PrototypeContext = {
@@ -56,7 +58,7 @@ export function usePrototype() {
 export function PrototypeProvider({ children }: { children: ReactNode }) {
   const router = useRouter()
   const [files, setFiles] = useState<DemoFile[]>([])
-  const [selectedId, selectFile] = useState('')
+  const [selectedId, setSelectedId] = useState('')
   const [reports, setReports] = useState<DemoReport[]>([])
   const [progress, setProgress] = useState(0)
   const [busy, setBusy] = useState(false)
@@ -81,6 +83,7 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
   const scanTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const running = useRef(false)
   const selected = files.find(file => file.id === selectedId)
+  const selectFile = (id: string) => { if (id !== selectedId) { removalAbort.current?.abort(); removalRequest.current += 1; setRemoval(undefined) } setSelectedId(id) }
   useEffect(() => () => {
     animation.current?.kill()
     if (scanTimer.current) clearTimeout(scanTimer.current)
@@ -117,11 +120,18 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     const controller = new AbortController()
     removalAbort.current = controller
     setRemoval({ fileId, status: 'planning' })
-    void planningBoundary.current!.planRemoval({ input, fieldIds: [], policy: 'jpeg-com' }, { signal: controller.signal }).then(result => {
+    void (async () => {
+      let result = await planningBoundary.current!.planRemoval({ input, fieldIds: [], policy: 'jpeg-com' }, { signal: controller.signal })
+      if (result.ok && result.value.removableTargetIds.length === 0) {
+        const targetIds = result.value.targets
+          .filter(target => target.category === 'comment' && target.removable && target.classification === 'SAFE_TO_REMOVE')
+          .map(target => target.id)
+        if (targetIds.length) result = await planningBoundary.current!.planRemoval({ input, fieldIds: targetIds, policy: 'jpeg-com' }, { signal: controller.signal })
+      }
       if (controller.signal.aborted || requestId !== removalRequest.current || selectedId !== fileId || localInputs.current.get(fileId) !== input) return
       if (result.ok) setRemoval({ fileId, status: result.value.status === 'ready' ? 'ready' : 'idle', plan: result.value, selectedTargetIds: [] } as RemovalState)
       else setRemoval({ fileId, status: result.error.code === 'UNSUPPORTED' ? 'unsupported' : 'failed', error: result.error })
-    })
+    })()
   }
   function setRemovalTargets(fileId: string, targetIds: readonly string[]) {
     setRemoval(current => current && current.fileId === fileId && (current.status === 'ready' || current.status === 'approval-pending') ? { ...current, status: 'ready', selectedTargetIds: [...new Set(targetIds)] } : current)
@@ -136,19 +146,21 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     const requestId = ++removalRequest.current
     const controller = new AbortController()
     removalAbort.current = controller
-    const approval: RemovalApproval = { planId: current.plan.id, inputId: input.descriptor.id, approvedTargetIds: targetIds, approvedAt: Date.now() }
+    const approval: RemovalApproval = { planId: current.plan.id, inputId: input.descriptor.id, sourceFingerprint: current.plan.sourceFingerprint, approvedTargetIds: targetIds, approvedAt: Date.now() }
     setRemoval({ fileId, status: 'processing', plan: current.plan, selectedTargetIds: targetIds })
     void processingBoundary.current!.execute({ operation: 'remove', input, plan: current.plan, approval }, { signal: controller.signal }).then(result => {
       if (controller.signal.aborted || requestId !== removalRequest.current || selectedId !== fileId || localInputs.current.get(fileId) !== input) { if (result.ok) result.value.output?.artifact.dispose(); return }
       if (result.ok && result.value.outputVerification === 'passed' && result.value.output?.created === true && result.value.output.artifact) {
         verifiedArtifacts.current.get(fileId)?.dispose()
         verifiedArtifacts.current.set(fileId, result.value.output.artifact)
-        const { output: _output, ...resultMetadata } = result.value
-        setRemoval({ fileId, status: 'success', result: resultMetadata })
+        const { output, ...resultMetadata } = result.value
+        setRemoval({ fileId, status: 'success', result: { ...resultMetadata, output: { filename: output.filename, created: true } } })
       } else {
         if (result.ok) result.value.output?.artifact.dispose()
         setRemoval({ fileId, status: 'failed', error: { code: 'VERIFICATION_FAILED', message: 'Local removal did not pass independent verification.' } })
       }
+    }).catch(() => {
+      if (!controller.signal.aborted && requestId === removalRequest.current && selectedId === fileId && localInputs.current.get(fileId) === input) setRemoval({ fileId, status: 'failed', error: { code: 'PROCESSING_FAILED', message: 'Local removal could not be completed.' } })
     })
   }
   async function downloadVerifiedRemoval(fileId: string): Promise<BoundaryResult<void>> {
@@ -214,7 +226,7 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     selectFile(additions[0].id)
     scan()
     router.push('/inspect')
-    toast.info('File names added locally. Contents are not read; all analysis is demo data.')
+    toast.info('File added locally. Real inspection runs on this device.')
   }
   function clearSession() {
     animation.current?.kill()
@@ -232,8 +244,9 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     toast.success('Session cleared. No source files were changed.')
   }
   function run(policy: string, removed: string[], edits: Record<string, string> = {}, batch = false) {
-    if (running.current || !selected) return
-    const targets = (batch ? files : [selected]).filter(f => !['error', 'unsupported'].includes(f.state))
+    if (running.current || !selected || !selected.demo) return
+    const targets = (batch ? files : [selected]).filter(f => f.demo && !['error', 'unsupported'].includes(f.state))
+    if (!targets.length || targets.some(file => !file.demo)) return
     if (!targets.length) { toast.error('No supported files are ready.'); return }
     running.current = true
     setBusy(true); setProgress(0)
