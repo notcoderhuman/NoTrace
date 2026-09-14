@@ -7,7 +7,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "tsx lib/processing-core/phase1-contract.test.ts"
+    "test": "pnpm test:phase1 && pnpm test:phase3a && pnpm test:jpeg-structure && pnpm test:removal-plan && pnpm test:processing-boundary",
+    "test:phase1": "echo [Phase 1/2 contract] && tsx lib/processing-core/phase1-contract.test.ts",
+    "test:phase3a": "echo [Phase 3A inspection] && tsx lib/local-boundary/phase3a-inspection.test.ts",
+    "test:jpeg-structure": "echo [JPEG structural inventory] && tsx lib/processing-core/adapters/jpeg-structure.test.ts",
+    "test:removal-plan": "echo [Removal planning] && tsx lib/local-boundary/removal-plan.test.ts",
+    "test:processing-boundary": "echo [Processing boundary] && tsx lib/local-boundary/processing-boundary.test.ts"
   },
   "dependencies": {
     "@base-ui/react": "^1.5.0",
