@@ -35,7 +35,7 @@ type RemovalState =
   | { fileId: string; status: 'unsupported' | 'failed'; error: BoundaryError }
 
 type PrototypeContext = {
-  files: DemoFile[]; selected: DemoFile | undefined; selectFile: (id: string) => void;
+  files: DemoFile[]; selected: DemoFile | undefined; previewUrl: string | undefined; previewError: boolean; setPreviewError: (value: boolean) => void; selectFile: (id: string) => void;
   addFiles: (files: FileList | File[]) => void; loadDemo: (batch?: boolean) => void;
   removeFile: (id: string) => void; clearSession: () => void; retryFile: (id: string) => void;
   reports: DemoReport[]; currentReport: DemoReport | undefined;
@@ -68,6 +68,10 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
   const [inspection, setInspection] = useState<InspectionState>()
   const [removal, setRemoval] = useState<RemovalState>()
   const localInputs = useRef(new Map<string, LocalInput>())
+  const localFiles = useRef(new Map<string, File>())
+  const previewUrlRef = useRef<string | undefined>(undefined)
+  const [previewUrl, setPreviewUrl] = useState<string | undefined>(undefined)
+  const [previewError, setPreviewError] = useState(false)
   const verifiedArtifacts = useRef(new Map<string, OutputArtifact>())
   const inspectionBoundary = useRef<LocalProcessingBoundary | null>(null)
   const planningBoundary = useRef<LocalProcessingBoundary | null>(null)
@@ -93,7 +97,21 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     verifiedArtifacts.current.clear()
     for (const input of localInputs.current.values()) input.release()
     localInputs.current.clear()
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
+    previewUrlRef.current = undefined
   }, [])
+  useEffect(() => {
+    if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current)
+    previewUrlRef.current = undefined
+    setPreviewUrl(undefined)
+    setPreviewError(false)
+    const file = selectedId ? localFiles.current.get(selectedId) : undefined
+    if (!file || !file.type.startsWith('image/')) return
+    const url = URL.createObjectURL(file)
+    previewUrlRef.current = url
+    setPreviewUrl(url)
+    return () => { if (previewUrlRef.current === url) { URL.revokeObjectURL(url); previewUrlRef.current = undefined } }
+  }, [selectedId])
   function inspectRealFile(fileId: string) {
     const input = localInputs.current.get(fileId)
     if (!input || fileId !== selectedId) return
@@ -214,13 +232,14 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
       const supported = ['jpg','jpeg','png','webp','gif','heic','mp4','mov','webm','mp3','wav','m4a','pdf','docx'].includes(ext)
       const id = crypto.randomUUID()
       localInputs.current.set(id, createBrowserFileInput(file))
+      localFiles.current.set(id, file)
       return { id, name: file.name, format: ext.toUpperCase() || 'Unknown', size: file.size > 1048576 ? `${(file.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(file.size / 1024))} KB`, kind: ['mp4','mov','webm'].includes(ext) ? 'video' : ['mp3','wav','m4a'].includes(ext) ? 'audio' : ['pdf','docx'].includes(ext) ? 'document' : 'image', state: supported ? 'ready' : 'unsupported', demo: false }
     })
     if (!additions.length) return
     setFiles(old => {
       const next = [...old, ...additions].slice(-30)
       const retained = new Set(next.map(file => file.id))
-      for (const [id, input] of localInputs.current) if (!retained.has(id)) { input.release(); localInputs.current.delete(id) }
+      for (const [id, input] of localInputs.current) if (!retained.has(id)) { input.release(); localInputs.current.delete(id); localFiles.current.delete(id) }
       return next
     })
     selectFile(additions[0].id)
@@ -238,6 +257,7 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     verifiedArtifacts.current.clear()
     for (const input of localInputs.current.values()) input.release()
     localInputs.current.clear()
+    localFiles.current.clear()
     setInspection(undefined)
     setRemoval(undefined)
     setFiles([]); setReports([]); selectFile(''); setAllDrafts({}); setBusy(false); setScanning(false); setProgress(0)
@@ -276,9 +296,9 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
       running.current = false; setBusy(false)
     } })
   }
-  return <Prototype.Provider value={{ files, selected, selectFile, addFiles, loadDemo, reports, currentReport: reports.find(r => r.fileId === selectedId), progress, busy, scanning, scenario, setScenario, run, clearSession, inspection, removal, planRealRemoval, setRemovalTargets, approveAndProcessRemoval, downloadVerifiedRemoval,
+  return <Prototype.Provider value={{ files, selected, previewUrl, previewError, setPreviewError, selectFile, addFiles, loadDemo, reports, currentReport: reports.find(r => r.fileId === selectedId), progress, busy, scanning, scenario, setScenario, run, clearSession, inspection, removal, planRealRemoval, setRemovalTargets, approveAndProcessRemoval, downloadVerifiedRemoval,
     drafts: allDrafts[selectedId] || {}, setDraft: (key, value) => setAllDrafts(old => ({ ...old, [selectedId]: { ...old[selectedId], [key]: value } })),
-    removeFile: id => { if (running.current) return; if (selectedId === id) inspectionAbort.current?.abort(); removalAbort.current?.abort(); verifiedArtifacts.current.get(id)?.dispose(); verifiedArtifacts.current.delete(id); localInputs.current.get(id)?.release(); localInputs.current.delete(id); if (inspection?.fileId === id) setInspection(undefined); if (removal?.fileId === id) setRemoval(undefined); setFiles(old => old.filter(f => f.id !== id)); if (selectedId === id) selectFile(files.find(f => f.id !== id)?.id || '') },
+    removeFile: id => { if (running.current) return; if (selectedId === id) inspectionAbort.current?.abort(); removalAbort.current?.abort(); verifiedArtifacts.current.get(id)?.dispose(); verifiedArtifacts.current.delete(id); localInputs.current.get(id)?.release(); localInputs.current.delete(id); localFiles.current.delete(id); if (inspection?.fileId === id) setInspection(undefined); if (removal?.fileId === id) setRemoval(undefined); setFiles(old => old.filter(f => f.id !== id)); if (selectedId === id) selectFile(files.find(f => f.id !== id)?.id || '') },
     retryFile: id => { setScenario('normal'); setFiles(old => old.map(f => f.id === id ? { ...f, state: 'ready' } : f)); toast.info('Demo reset. You can run the workflow again.') },
   }}><TooltipProvider delay={300}>{children}<Toaster theme="dark" position="bottom-right" closeButton /></TooltipProvider></Prototype.Provider>
 }
