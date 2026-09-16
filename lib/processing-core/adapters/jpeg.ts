@@ -6,6 +6,8 @@ import { validateRemovalApproval, canAuthorizeRemoval } from '../classification/
 import type { FormatAdapter } from './registry'
 import type { ProcessingResult, RemovalApproval, RemovalPlan, RemovalTarget, RemovalWitness, RemovalTraceEntry } from '../domain/operation'
 import { phaseOneSafetyPolicy, type SafetyPolicy, structuralLimits } from '../classification/safety-policy'
+import { JPEG_PROCESSING_IDENTITY } from '../domain/identity'
+import { probePrefix } from '../domain/probe'
 
 export const JPEG_MAX_INSPECTION_BYTES = structuralLimits.maxInputBytes
 export const JPEG_MAX_SEGMENTS = structuralLimits.maxSegments
@@ -208,7 +210,7 @@ export async function createJpegRemovalPlan(input: LocalInput, inventory: JpegSt
   const unknownRequests = requestedTargetIds.filter(id => !targets.some(target => target.id === id))
   const warnings = targets.filter(target => !target.removable).map(target => `${target.id}: ${target.reason}`)
   if (unknownRequests.length) warnings.push(...unknownRequests.map(id => `${id}: target was not found in the structural inventory.`))
-  return { ok: true, value: { id: `plan-${input.descriptor.id}-${inventory.inputSize}-${sourceHash.value.slice(0, 16)}`, status: removableTargetIds.length ? 'ready' : 'unsupported', input: input.descriptor, sourceFingerprint: sourceHash.value, targets, removableTargetIds, preservedTargetIds, warnings, requiresApproval: true, removableFieldIds: [], preservedFieldIds: [], removalWitnesses: targets.filter(target => removableTargetIds.includes(target.id)).map(target => ({ sourceFingerprint: sourceHash.value, targetId: target.id, ordinal: target.ordinal, startOffset: target.startOffset, endOffset: target.endOffset, marker: target.marker, rangeLength: target.endOffset - target.startOffset })) } }
+  return { ok: true, value: { id: `plan-${input.descriptor.id}-${inventory.inputSize}-${sourceHash.value.slice(0, 16)}`, status: removableTargetIds.length ? 'ready' : 'unsupported', identity: JPEG_PROCESSING_IDENTITY, input: input.descriptor, sourceFingerprint: sourceHash.value, targets, removableTargetIds, preservedTargetIds, warnings, requiresApproval: true, removableFieldIds: [], preservedFieldIds: [], removalWitnesses: targets.filter(target => removableTargetIds.includes(target.id)).map(target => ({ sourceFingerprint: sourceHash.value, targetId: target.id, ordinal: target.ordinal, startOffset: target.startOffset, endOffset: target.endOffset, marker: target.marker, rangeLength: target.endOffset - target.startOffset })) } }
 }
 
 export async function planJpegRemoval(input: LocalInput, requestedTargetIds: readonly string[], _policyName: string, signal?: AbortSignal): Promise<BoundaryResult<RemovalPlan>> {
@@ -257,7 +259,7 @@ export async function verifyJpegOutput(input: LocalInput, output: import('../dom
   }
   const preservedTargetIds = sourceSegments.flatMap(segment => segment.target && !approved.has(segment.target.id) ? [segment.target.id] : [])
   const removalTrace = witnesses.map(witness => ({ ...witness }))
-  return { ok: true, value: { kind: 'verification', status: 'success', input: input.descriptor, outputCreated: true, output, sourceFingerprint: source.value.inventory.sourceFingerprint, planId: plan.id, inputId: plan.input.id, approvedTargetIds: approval.approvedTargetIds, removalTrace, checks: verificationChecks('passed'), removedTargetIds: approvedSegments.map(segment => segment.target!.id), preservedTargetIds, warnings: [] } }
+  return { ok: true, value: { kind: 'verification', status: 'success', input: input.descriptor, outputCreated: true, output, sourceFingerprint: source.value.inventory.sourceFingerprint, identity: JPEG_PROCESSING_IDENTITY, planId: plan.id, inputId: plan.input.id, approvedTargetIds: approval.approvedTargetIds, removalTrace, checks: verificationChecks('passed'), removedTargetIds: approvedSegments.map(segment => segment.target!.id), preservedTargetIds, warnings: [] } }
 }
 
 export async function removeJpegCom(input: LocalInput, plan: RemovalPlan, approval: RemovalApproval, signal?: AbortSignal): Promise<BoundaryResult<ProcessingResult>> {
@@ -326,9 +328,10 @@ export async function inspectJpegStructure(input: LocalInput, signal?: AbortSign
 export const jpegAdapter: FormatAdapter & { inspect: typeof inspectJpeg } = {
   id: 'jpeg-inspection',
   role: 'transformer',
+  formatId: 'jpeg', engineId: 'notrace-jpeg', engineVersion: '1', capabilityKey: 'jpeg:remove-com', verifierCompatibilityKey: 'notrace-jpeg-com-v1', verificationCheckIds: verificationNames,
+  probe: async (input, signal) => { const prefix = await probePrefix(input, 2, signal); if (!prefix.ok) return prefix; return prefix.value.length === 2 && prefix.value[0] === 0xff && prefix.value[1] === 0xd8 ? { ok: true, value: { formatId: 'jpeg', mediaType: 'image/jpeg', confidence: 'structural' as const } } : { ok: false, error: { code: 'UNSUPPORTED' as const, message: 'Input is not a JPEG stream.' } } },
   capability: { extensions: ['jpg', 'jpeg'], mimeTypes: ['image/jpeg'], operations: ['inspect', 'remove'] },
   inspect: inspectJpeg,
   planRemoval: planJpegRemoval,
   remove: removeJpegCom,
-  verifyOutput: verifyJpegOutput,
 }

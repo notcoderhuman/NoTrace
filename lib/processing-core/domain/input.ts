@@ -35,7 +35,8 @@ export function createDescriptorInput(descriptor: LocalInputDescriptor): LocalIn
 export function createMemoryInput(bytes: Uint8Array, descriptor: Omit<LocalInputDescriptor, 'size' | 'source'> & { size?: number }): LocalInput {
   const copy = new Uint8Array(bytes)
   let released = false
-  const fullDescriptor: LocalInputDescriptor = { ...descriptor, size: descriptor.size ?? copy.byteLength, source: 'memory' }
+  if (descriptor.size !== undefined && descriptor.size !== copy.byteLength) throw new RangeError('Memory input descriptor size must match its bytes.')
+  const fullDescriptor: LocalInputDescriptor = { ...descriptor, size: copy.byteLength, source: 'memory' }
   return {
     descriptor: fullDescriptor,
     async read(range, signal) {

@@ -1,0 +1,14 @@
+import type { BoundaryResult } from './result'
+import type { LocalInput } from './input'
+
+export type ContentProbe = Readonly<{ formatId: string; mediaType: string; confidence: 'structural' }>
+export type ContentProbeAdapter = Readonly<{ formatId: string; probe(input: LocalInput, signal?: AbortSignal): Promise<BoundaryResult<ContentProbe>> }>
+
+/** Bounded content probing is authoritative; filename and MIME are routing hints only. */
+export async function probePrefix(input: LocalInput, length: number, signal?: AbortSignal): Promise<BoundaryResult<Uint8Array>> {
+  if (!Number.isSafeInteger(length) || length <= 0 || length > 64 * 1024) return { ok: false, error: { code: 'INVALID_INPUT', message: 'Probe length is invalid.' } }
+  if (signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Content probing was cancelled.' } }
+  const boundedLength = input.descriptor.size === undefined ? length : Math.min(length, input.descriptor.size)
+  if (boundedLength === 0) return { ok: true, value: new Uint8Array() }
+  return input.read({ offset: 0, length: boundedLength }, signal)
+}

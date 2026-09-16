@@ -22,15 +22,22 @@ export function mapRealFile(input: Readonly<{ id: string; filename: string; mime
 export function mapRealRisk(): RiskAssessmentViewModel { return { state: 'NOT_AVAILABLE', reasons: [], contributingFindingIds: [], confidence: 'unknown', methodology: { id: 'not-implemented', version: '1' }, source: 'real' } }
 export function mapRealProgress(state: ProgressViewModel['state'], detail?: string): ProgressViewModel { return { state, mode: 'indeterminate', label: state.replaceAll('-', ' '), detail } }
 
-export function mapRealRemoval(plan: RemovalPlan, selectedTargetIds: readonly string[] = [], processing?: ProcessingResult): RemovalViewModel {
+export type SafeProcessingProjection = Readonly<Pick<ProcessingResult, 'status' | 'outputVerification' | 'removedTargetIds' | 'preservedTargetIds' | 'warnings'> & { output?: Readonly<{ filename: string; created: true }>; verification?: VerificationResult; providerOwned?: true }>
+
+export function mapRealRemoval(plan: RemovalPlan, selectedTargetIds: readonly string[] = [], processing?: SafeProcessingProjection): RemovalViewModel {
   const targets = plan.targets.map(target => ({ id: target.id, label: target.category, category: target.category, capability: target.removable ? 'removable' as const : target.classification === 'PROTECTED' ? 'protected' as const : target.classification === 'UNKNOWN' ? 'unknown' as const : 'preserved' as const, selectable: target.removable && plan.removableTargetIds.includes(target.id), reason: target.reason }))
-  const state = processing?.outputVerification === 'passed' ? 'verified' : processing?.status === 'failed' ? 'failed' : plan.status === 'unsupported' ? 'unsupported' : plan.status === 'unknown' ? 'unknown' : plan.removableTargetIds.length ? 'ready-with-targets' : 'ready-empty'
-  return { state, targets, selectedTargetIds, requestedTargetIds: processing ? selectedTargetIds : [], removedTargetIds: processing?.removedTargetIds || [], preservedTargetIds: processing?.preservedTargetIds || plan.preservedTargetIds, limitations: plan.warnings, output: processing?.output ? { filename: processing.output.filename, ownership: processing.outputVerification === 'passed' ? 'verified' : 'execution', downloadable: processing.outputVerification === 'passed' } : undefined }
+  const authoritativeVerification = processing?.providerOwned === true && processing?.verification?.status === 'success' && processing.verification.outputCreated === true && processing.outputVerification === 'passed' && processing.output !== undefined
+  const state = processing?.status === 'success' && processing.outputVerification === 'passed' && authoritativeVerification ? 'verified' : processing?.status === 'unsupported' ? 'unsupported' : processing ? 'failed' : plan.status === 'unsupported' ? 'unsupported' : plan.status === 'unknown' ? 'unknown' : plan.removableTargetIds.length ? 'ready-with-targets' : 'ready-empty'
+  const verifiedOutput = processing?.status === 'success' && processing.outputVerification === 'passed' && authoritativeVerification ? processing.output : undefined
+  return { state, targets, selectedTargetIds, requestedTargetIds: processing ? selectedTargetIds : [], removedTargetIds: processing?.removedTargetIds || [], preservedTargetIds: processing?.preservedTargetIds || plan.preservedTargetIds, limitations: plan.warnings, output: verifiedOutput ? { filename: verifiedOutput.filename, ownership: 'verified', downloadable: true } : undefined }
 }
 
-export function mapRealVerification(result?: VerificationResult): VerificationViewModel {
+export function mapRealVerification(result?: VerificationResult, expected?: Readonly<{ sourceFingerprint: string; identity: VerificationResult['identity'] }>): VerificationViewModel {
   if (!result) return { state: 'not-run', checks: [], sourceBinding: 'unknown', identityBinding: 'unknown', preservedItems: [], removedItems: [], warnings: [], provenance: 'real' }
-  return { state: result.status === 'success' ? 'passed' : result.status === 'failed' ? 'failed' : 'not-run', checks: result.checks.map(check => ({ id: check.id, label: check.name, state: check.status === 'passed' ? 'passed' : check.status === 'failed' ? 'failed' : 'not-run' })), sourceBinding: result.sourceFingerprint ? 'matched' : 'unknown', identityBinding: result.identity ? 'matched' : 'unknown', preservedItems: result.preservedTargetIds, removedItems: result.removedTargetIds, warnings: result.warnings, provenance: 'real' }
+  const sourceMatched = Boolean(expected && result.sourceFingerprint === expected.sourceFingerprint)
+  const identityMatched = Boolean(expected && JSON.stringify(result.identity) === JSON.stringify(expected.identity))
+  const authoritative = result.status === 'success' && sourceMatched && identityMatched
+  return { state: authoritative ? 'passed' : result.status === 'failed' ? 'failed' : 'not-run', checks: result.checks.map(check => ({ id: check.id, label: check.name, state: check.status === 'passed' ? 'passed' : check.status === 'failed' ? 'failed' : 'not-run' })), sourceBinding: sourceMatched ? 'matched' : 'unknown', identityBinding: identityMatched ? 'matched' : 'unknown', preservedItems: result.preservedTargetIds, removedItems: result.removedTargetIds, warnings: result.warnings, provenance: 'real' }
 }
 
 export function mapRealReport(input: Readonly<{ filename: string; format?: string; size?: number }>, findings: readonly PrivacyFindingViewModel[], removal: RemovalViewModel, verification: VerificationViewModel, limitations: readonly string[] = []): ReportViewModel {

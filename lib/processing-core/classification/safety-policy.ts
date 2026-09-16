@@ -6,12 +6,14 @@ export type RemovalScope = 'jpeg-com'
 export type SafetyPolicy = Readonly<{
   maxInputBytes: number
   maxOutputBytes: number
+  /** Applies to one real destructive operation; the UI session queue is separate. */
   maxFiles: number
   maxSegments: number
   maxMetadataSegmentBytes: number
   maxTotalMetadataBytes: number
   allowedOperations: readonly Operation[]
   allowedRemovalScopes: readonly RemovalScope[]
+  /** Verified in-memory output is allowed; provider download remains a separate gate. */
   allowOutput: boolean
   preserveOriginal: true
   failClosed: true
@@ -34,7 +36,7 @@ export const phaseOneSafetyPolicy: SafetyPolicy = Object.freeze({
   ...structuralLimits,
   allowedOperations: Object.freeze(['inspect', 'remove', 'edit', 'verify'] as Operation[]),
   allowedRemovalScopes: Object.freeze(['jpeg-com'] as RemovalScope[]),
-  allowOutput: false,
+  allowOutput: true,
   preserveOriginal: true,
   failClosed: true,
   retainInMemoryOnly: true,

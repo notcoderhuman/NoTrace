@@ -17,10 +17,11 @@ export function createInspectionBoundary(registry: FormatAdapterRegistry): Local
       const valid = validateInput(input)
       if (!valid.ok) return valid
       if (options?.signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Inspection was cancelled.' } }
-      const resolved = registry.resolveInspection(input.descriptor)
+      const resolved = await registry.resolveVerified(input, 'inspect', options?.signal)
       if (!resolved.ok) return resolved
+      if (options?.signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Inspection was cancelled.' } }
       if (!resolved.value.inspect) return { ok: false, error: { code: 'UNSUPPORTED', message: 'The selected adapter cannot inspect this input.' } }
-      return resolved.value.inspect(input, options?.signal)
+      try { return await resolved.value.inspect(input, options?.signal) } catch { return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Local inspection could not be completed.' } } }
     },
     async planRemoval(_request: RemovalRequest): Promise<BoundaryResult<RemovalPlan>> {
       return { ok: false, error: { code: 'UNSUPPORTED', message: 'Removal planning is not available in inspection-only mode.' } }

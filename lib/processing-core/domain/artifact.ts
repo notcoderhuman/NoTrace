@@ -11,6 +11,20 @@ export interface OutputArtifact {
   dispose(): void
 }
 
+const disposedArtifacts = new WeakSet<object>()
+
+export function disposeArtifact(artifact: OutputArtifact | undefined): BoundaryResult<void> {
+  if (!artifact) return { ok: true, value: undefined }
+  if (disposedArtifacts.has(artifact)) return { ok: true, value: undefined }
+  try {
+    artifact.dispose()
+    disposedArtifacts.add(artifact)
+    return { ok: true, value: undefined }
+  } catch {
+    return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Output artifact cleanup failed.' } }
+  }
+}
+
 export function createMemoryArtifact(bytes: Uint8Array, filename: string, mediaType = 'image/jpeg'): OutputArtifact {
   const copy = new Uint8Array(bytes)
   const id = crypto.randomUUID()

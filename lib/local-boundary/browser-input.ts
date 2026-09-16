@@ -4,6 +4,7 @@ import type { BoundaryResult } from '../processing-core/domain/result'
 export const DEFAULT_BROWSER_INPUT_MAX_BYTES = 32 * 1024 * 1024
 
 export function createBrowserFileInput(file: File, maxBytes = DEFAULT_BROWSER_INPUT_MAX_BYTES): LocalInput {
+  if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) throw new TypeError('maxBytes must be a positive safe integer')
   const descriptor: LocalInputDescriptor = {
     id: crypto.randomUUID(),
     filename: file.name,

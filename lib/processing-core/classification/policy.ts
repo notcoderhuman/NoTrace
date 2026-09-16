@@ -21,9 +21,14 @@ export function canAuthorizeRemoval(target: RemovalTarget, policy: SafetyPolicy)
 }
 
 export function validateRemovalApproval(approval: RemovalApproval, plan: RemovalPlan): boolean {
-  if (approval.planId !== plan.id || approval.inputId !== plan.input.id || approval.sourceFingerprint !== plan.sourceFingerprint || !Number.isSafeInteger(approval.approvedAt) || approval.approvedAt < 0) return false
+  if (!approval || !plan || plan.status !== 'ready' || !plan.requiresApproval || approval.planId !== plan.id || approval.inputId !== plan.input.id || approval.sourceFingerprint !== plan.sourceFingerprint || !sameIdentity(approval.identity, plan.identity) || !Number.isSafeInteger(approval.approvedAt) || approval.approvedAt < 0 || !Array.isArray(approval.approvedTargetIds)) return false
+  if (approval.approvedTargetIds.length === 0 || new Set(approval.approvedTargetIds).size !== approval.approvedTargetIds.length) return false
   const allowed = new Set(plan.removableTargetIds)
-  return approval.approvedTargetIds.every(id => allowed.has(id))
+  return approval.approvedTargetIds.every(id => typeof id === 'string' && id.length > 0 && allowed.has(id))
+}
+
+function sameIdentity(left: RemovalApproval['identity'], right: RemovalPlan['identity']): boolean {
+  return left.formatId === right.formatId && left.engineId === right.engineId && left.engineVersion === right.engineVersion && left.capabilityKey === right.capabilityKey && left.policyId === right.policyId && left.policyVersion === right.policyVersion && left.verifierCompatibilityKey === right.verifierCompatibilityKey
 }
 
 export function classifyRequestedFields(fields: readonly MetadataField[], requestedIds: readonly string[]) {

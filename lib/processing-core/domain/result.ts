@@ -2,6 +2,7 @@ import type { FileIdentity } from './file'
 import type { LocalInputDescriptor } from './input'
 import type { OutputArtifact } from './artifact'
 import type { RemovalTraceEntry } from './operation'
+import type { ProcessingIdentity } from './identity'
 
 export const JPEG_VERIFICATION_CHECK_IDS = ['output-soi', 'output-eoi', 'segment-structure', 'output-size', 'segment-count', 'approved-com-absent', 'preserved-targets-present', 'image-bytes-preserved', 'retained-segments-preserved', 'retained-order-preserved', 'no-unexpected-changes', 'original-unchanged', 'distinct-artifact'] as const
 
@@ -13,6 +14,8 @@ export type VerificationCheck = Readonly<{
 
 export type VerificationResult = Readonly<{
   kind: 'verification'
+  /** Generic boundary fields; format-specific checks remain in the adapter. */
+  identity: ProcessingIdentity
   status: 'success' | 'partial' | 'failed' | 'unsupported'
   input: LocalInputDescriptor
   outputCreated: boolean

@@ -1,6 +1,7 @@
 import type { LocalInput, LocalInputDescriptor } from './input'
 import type { SafetyClassification } from './metadata'
 import type { OutputArtifact } from './artifact'
+import type { ProcessingIdentity } from './identity'
 
 export type Operation = 'inspect' | 'remove' | 'edit' | 'verify'
 
@@ -14,7 +15,7 @@ export type RemovalTargetCategory = 'comment' | 'xmp' | 'exif' | 'icc' | 'unknow
 
 export type RemovalTarget = Readonly<{
   id: string
-  kind: 'jpeg-segment'
+  kind: 'jpeg-segment' | 'format-target'
   marker: number
   ordinal: number
   startOffset: number
@@ -40,6 +41,8 @@ export type RemovalTraceEntry = RemovalWitness
 export type RemovalPlan = Readonly<{
   id: string
   status: 'ready' | 'unsupported' | 'unknown'
+  /** NoTrace-owned identity binding required for executable plans. */
+  identity: ProcessingIdentity
   input: LocalInputDescriptor
   sourceFingerprint: string
   targets: readonly RemovalTarget[]
@@ -56,6 +59,7 @@ export type RemovalApproval = Readonly<{
   planId: string
   inputId: string
   sourceFingerprint: string
+  identity: ProcessingIdentity
   approvedTargetIds: readonly string[]
   approvedAt: number
 }>
@@ -82,6 +86,9 @@ export type ProcessingResult = Readonly<{
   input: Readonly<{ filename: string; mimeType?: string; size?: number }>
   output?: Readonly<{ filename: string; created: true; artifact: OutputArtifact }>
   outputVerification: 'not-run' | 'passed'
+  /** Authoritative verifier result propagated for presentation projection only. */
+  verification?: import('./result').VerificationResult
+  identity?: ProcessingIdentity
   removalTrace?: readonly RemovalTraceEntry[]
   removedTargetIds: readonly string[]
   preservedTargetIds: readonly string[]

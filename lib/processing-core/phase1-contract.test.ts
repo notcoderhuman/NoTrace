@@ -8,6 +8,7 @@ import type { MetadataField, SafetyClassification } from './domain/metadata'
 import { canAuthorizeRemoval, validateRemovalApproval } from './classification/policy'
 import { phaseOneSafetyPolicy } from './classification/safety-policy'
 import type { RemovalTarget } from './domain/operation'
+import { JPEG_PROCESSING_IDENTITY } from './domain/identity'
 
 const input = createDescriptorInput({ id: 'test', filename: 'photo.jpg', source: 'opaque', mimeType: 'image/jpeg', size: 100 })
 
@@ -135,10 +136,10 @@ async function main() {
     assert.equal(phaseOneSafetyPolicy.preserveOriginal, true)
     assert.equal(phaseOneSafetyPolicy.failClosed, true)
     assert.equal(phaseOneSafetyPolicy.retainInMemoryOnly, true)
-    const plan = { id: 'plan-1', status: 'ready' as const, input: input.descriptor, sourceFingerprint: 'fingerprint', targets: [target], removableTargetIds: [target.id], preservedTargetIds: [], warnings: [], requiresApproval: true as const, removableFieldIds: [], preservedFieldIds: [], removalWitnesses: [] }
-    assert.equal(validateRemovalApproval({ planId: 'plan-1', inputId: 'test', sourceFingerprint: 'fingerprint', approvedTargetIds: [target.id], approvedAt: 1 }, plan), true)
-    assert.equal(validateRemovalApproval({ planId: 'stale', inputId: 'test', sourceFingerprint: 'fingerprint', approvedTargetIds: [target.id], approvedAt: 1 }, plan), false)
-    assert.equal(validateRemovalApproval({ planId: 'plan-1', inputId: 'other', sourceFingerprint: 'fingerprint', approvedTargetIds: [target.id], approvedAt: 1 }, plan), false)
+    const plan = { id: 'plan-1', status: 'ready' as const, identity: JPEG_PROCESSING_IDENTITY, input: input.descriptor, sourceFingerprint: 'fingerprint', targets: [target], removableTargetIds: [target.id], preservedTargetIds: [], warnings: [], requiresApproval: true as const, removableFieldIds: [], preservedFieldIds: [], removalWitnesses: [] }
+    assert.equal(validateRemovalApproval({ planId: 'plan-1', inputId: 'test', sourceFingerprint: 'fingerprint', identity: JPEG_PROCESSING_IDENTITY, approvedTargetIds: [target.id], approvedAt: 1 }, plan), true)
+    assert.equal(validateRemovalApproval({ planId: 'stale', inputId: 'test', sourceFingerprint: 'fingerprint', identity: JPEG_PROCESSING_IDENTITY, approvedTargetIds: [target.id], approvedAt: 1 }, plan), false)
+    assert.equal(validateRemovalApproval({ planId: 'plan-1', inputId: 'other', sourceFingerprint: 'fingerprint', identity: JPEG_PROCESSING_IDENTITY, approvedTargetIds: [target.id], approvedAt: 1 }, plan), false)
   })
 
   await test('JPEG registry exposes inspection and plan-only removal', () => {

@@ -1,6 +1,7 @@
 import type { LocalInputDescriptor } from '../domain/input'
 import type { Operation } from '../domain/operation'
 import type { BoundaryResult } from '../domain/result'
+import type { ContentProbe } from '../domain/probe'
 import type { LocalInput } from '../domain/input'
 import type { InspectionResult } from '../domain/metadata'
 import type { ProcessingResult, RemovalPlan } from '../domain/operation'
@@ -13,6 +14,15 @@ export type AdapterCapability = Readonly<{
 
 export type FormatAdapter = Readonly<{
   id: string
+  /** Explicit format/engine binding; hints never establish authenticity. */
+  formatId?: string
+  engineId?: string
+  engineVersion?: string
+  capabilityKey?: string
+  verifierCompatibilityKey?: string
+  verifierIndependence?: 'structural-independent' | string
+  verificationCheckIds?: readonly string[]
+  probe?: (input: LocalInput, signal?: AbortSignal) => Promise<BoundaryResult<ContentProbe>>
   capability: AdapterCapability
   inspect?: (input: LocalInput, signal?: AbortSignal) => Promise<BoundaryResult<InspectionResult>>
   planRemoval?: (input: LocalInput, targetIds: readonly string[], policy: string, signal?: AbortSignal) => Promise<BoundaryResult<RemovalPlan>>
@@ -25,10 +35,12 @@ export type FormatAdapter = Readonly<{
 export interface FormatAdapterRegistry {
   register(adapter: FormatAdapter): BoundaryResult<void>
   resolve(input: LocalInputDescriptor, operation: Operation): BoundaryResult<FormatAdapter>
+  resolveVerified(input: LocalInput, operation: Operation, signal?: AbortSignal): Promise<BoundaryResult<FormatAdapter>>
+  resolveVerifiedVerifier(input: LocalInput, executorId: string, compatibilityKey: string | undefined, signal?: AbortSignal): Promise<BoundaryResult<FormatAdapter>>
   resolveInspection(input: LocalInputDescriptor): BoundaryResult<FormatAdapter>
   resolveRemovalPlan(input: LocalInputDescriptor): BoundaryResult<FormatAdapter>
   resolveRemoval(input: LocalInputDescriptor): BoundaryResult<FormatAdapter>
-  resolveVerifier(input: LocalInputDescriptor, executorId?: string): BoundaryResult<FormatAdapter>
+  resolveVerifier(input: LocalInputDescriptor, executorId?: string, compatibilityKey?: string): BoundaryResult<FormatAdapter>
   list(): readonly FormatAdapter[]
 }
 
@@ -50,6 +62,22 @@ export function createFormatAdapterRegistry(): FormatAdapterRegistry {
       const adapter = adapters.find(candidate => matches(candidate, input, operation))
       return adapter ? { ok: true, value: adapter } : { ok: false, error: { code: 'UNSUPPORTED', message: `No adapter is registered for ${operation}.` } }
     },
+    async resolveVerified(input, operation, signal) {
+      const candidates = adapters.filter(candidate => candidate.capability.operations.includes(operation) && typeof candidate.probe === 'function' && typeof candidate.formatId === 'string' && candidate.formatId.trim())
+      if (!candidates.length) return { ok: false, error: { code: 'UNSUPPORTED', message: `No content-probing adapter is registered for ${operation}.` } }
+      const matched: FormatAdapter[] = []
+      for (const candidate of candidates) {
+        if (signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Content probing was cancelled.' } }
+        let probed: BoundaryResult<ContentProbe>
+        try { probed = await candidate.probe!(input, signal) } catch { return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Content probing could not be completed.' } } }
+        if (signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Content probing was cancelled.' } }
+        if (!probed.ok) { if (probed.error.code === 'CANCELLED' || probed.error.code === 'LIMIT_EXCEEDED') return probed; continue }
+        if (!probed.value || probed.value.confidence !== 'structural' || probed.value.formatId !== candidate.formatId || !candidate.capability.mimeTypes.includes(probed.value.mediaType)) continue
+        matched.push(candidate)
+      }
+      if (matched.length !== 1) return { ok: false, error: { code: matched.length > 1 ? 'INVALID_INPUT' : 'UNSUPPORTED', message: matched.length > 1 ? 'Content matches multiple capabilities.' : 'Content does not match a registered capability.' } }
+      return { ok: true, value: matched[0] }
+    },
     resolveInspection(input) {
       const adapter = adapters.find(candidate => matches(candidate, input, 'inspect') && typeof candidate.inspect === 'function')
       return adapter ? { ok: true, value: adapter } : { ok: false, error: { code: 'UNSUPPORTED', message: 'No inspection adapter is registered for this input.' } }
@@ -62,9 +90,24 @@ export function createFormatAdapterRegistry(): FormatAdapterRegistry {
       const adapter = adapters.find(candidate => matches(candidate, input, 'remove') && typeof candidate.remove === 'function')
       return adapter ? { ok: true, value: adapter } : { ok: false, error: { code: 'UNSUPPORTED', message: 'No removal execution adapter is registered for this input.' } }
     },
-    resolveVerifier(input, executorId) {
-      const adapter = adapters.find(candidate => matches(candidate, input, 'verify') && candidate.role === 'verifier' && typeof candidate.verifyOutput === 'function' && candidate.id !== executorId)
-      return adapter ? { ok: true, value: adapter } : { ok: false, error: { code: 'UNSUPPORTED', message: 'No independent verification adapter is registered for this input.' } }
+    async resolveVerifiedVerifier(input, executorId, compatibilityKey, signal) {
+      const candidates = adapters.filter(candidate => candidate.capability.operations.includes('verify') && candidate.role === 'verifier' && typeof candidate.verifyOutput === 'function' && candidate.id !== executorId && candidate.verifierIndependence === 'structural-independent' && typeof candidate.probe === 'function' && typeof candidate.formatId === 'string' && candidate.formatId.trim() && (!compatibilityKey || candidate.verifierCompatibilityKey === compatibilityKey))
+      if (!candidates.length) return { ok: false, error: { code: 'UNSUPPORTED', message: 'No content-verified independent verifier is registered.' } }
+      const matched: FormatAdapter[] = []
+      for (const candidate of candidates) {
+        if (signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Verifier selection was cancelled.' } }
+        let probed: BoundaryResult<ContentProbe>
+        try { probed = await candidate.probe!(input, signal) } catch { return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Verifier content probing could not be completed.' } } }
+        if (signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Verifier selection was cancelled.' } }
+        if (!probed.ok) { if (probed.error.code === 'CANCELLED' || probed.error.code === 'LIMIT_EXCEEDED') return probed; continue }
+        if (probed.value.confidence === 'structural' && probed.value.formatId === candidate.formatId && candidate.capability.mimeTypes.includes(probed.value.mediaType)) matched.push(candidate)
+      }
+      if (matched.length !== 1) return { ok: false, error: { code: matched.length > 1 ? 'INVALID_INPUT' : 'UNSUPPORTED', message: matched.length > 1 ? 'Content matches multiple independent verifiers.' : 'No content-verified independent verifier is registered.' } }
+      return { ok: true, value: matched[0] }
+    },
+    resolveVerifier(input, executorId, compatibilityKey) {
+      const adapter = adapters.find(candidate => matches(candidate, input, 'verify') && candidate.role === 'verifier' && typeof candidate.verifyOutput === 'function' && candidate.id !== executorId && (!compatibilityKey || candidate.verifierCompatibilityKey === compatibilityKey))
+      return adapter ? { ok: true, value: adapter } : { ok: false, error: { code: 'UNSUPPORTED', message: 'LEGACY / NON-DESTRUCTIVE / NON-AUTHORITATIVE verifier resolution is unavailable for destructive execution.' } }
     },
     list: () => adapters.slice(),
   }
