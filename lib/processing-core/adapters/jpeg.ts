@@ -1,5 +1,6 @@
 import type { LocalInput } from '../domain/input'
 import type { InspectionResult, MetadataField } from '../domain/metadata'
+import type { EvidenceRecord, StaticCapabilityDeclaration, ResourceContract, AdapterConformance } from '../domain/contracts'
 import type { BoundaryResult } from '../domain/result'
 import { createMemoryArtifact } from '../domain/artifact'
 import { validateRemovalApproval, canAuthorizeRemoval } from '../classification/policy'
@@ -8,11 +9,40 @@ import type { ProcessingResult, RemovalApproval, RemovalPlan, RemovalTarget, Rem
 import { phaseOneSafetyPolicy, type SafetyPolicy, structuralLimits } from '../classification/safety-policy'
 import { JPEG_PROCESSING_IDENTITY } from '../domain/identity'
 import { probePrefix } from '../domain/probe'
+import type { AdapterContract, ContractOperationContext } from '../domain/contracts'
+import { verifyJpegOutputIndependently } from './jpeg-verifier'
 
 export const JPEG_MAX_INSPECTION_BYTES = structuralLimits.maxInputBytes
 export const JPEG_MAX_SEGMENTS = structuralLimits.maxSegments
 export const JPEG_MAX_METADATA_SEGMENT_BYTES = structuralLimits.maxMetadataSegmentBytes
 export const JPEG_MAX_TOTAL_METADATA_BYTES = structuralLimits.maxTotalMetadataBytes
+
+export const jpegCapabilityDeclaration: StaticCapabilityDeclaration = {
+  formatId: 'jpeg',
+  operations: ['inspect', 'planRemoval', 'executeRemoval', 'verifyRemoval'],
+  extensions: ['jpg', 'jpeg'],
+  mimeTypes: ['image/jpeg'],
+  processingIdentity: JPEG_PROCESSING_IDENTITY,
+  verifierCompatibilityKey: 'notrace-jpeg-com-v1',
+}
+
+export const jpegResourceContract: ResourceContract = {
+  inputBound: { maxBytes: JPEG_MAX_INSPECTION_BYTES, state: 'measured' },
+  fullBufferOperations: { state: 'inferred' },
+  streaming: { supported: false, state: 'measured' },
+  worker: { required: false, state: 'measured' },
+  transfer: { transferable: false, copies: true, state: 'inferred' },
+  temporaryAllocations: 'inferred',
+  concurrency: { state: 'unmeasured' },
+  cancellationPoints: ['input read', 'structural scan', 'fingerprint', 'segment copy', 'verification'],
+}
+
+export const jpegConformance: AdapterConformance = {
+  level: 'verification-capable',
+  declaration: jpegCapabilityDeclaration,
+  resource: jpegResourceContract,
+  independentVerifier: true,
+}
 
 const verificationNames = ['output-soi', 'output-eoi', 'segment-structure', 'output-size', 'segment-count', 'approved-com-absent', 'preserved-targets-present', 'image-bytes-preserved', 'retained-segments-preserved', 'retained-order-preserved', 'no-unexpected-changes', 'original-unchanged', 'distinct-artifact'] as const
 
@@ -186,6 +216,20 @@ function inspectSegments(bytes: Uint8Array, signal?: AbortSignal): BoundaryResul
   return { ok: true, value: { fields, inventory: { segments, inputSize: bytes.byteLength, sourceFingerprint: '' } } }
 }
 
+export function jpegEvidenceFromInspection(result: InspectionResult): readonly EvidenceRecord[] {
+  return result.fields.map(fieldValue => ({
+    id: fieldValue.id,
+    label: fieldValue.label,
+    category: fieldValue.category,
+    state: fieldValue.value === undefined || fieldValue.value === '' ? 'unknown' : 'detected',
+    safety: fieldValue.classification === 'SAFE_TO_REMOVE' ? 'safe-to-remove' : fieldValue.classification === 'EDITABLE' ? 'editable' : fieldValue.classification === 'PROTECTED' ? 'protected' : fieldValue.classification === 'UNSUPPORTED' ? 'unsupported' : 'unknown',
+    explanation: fieldValue.value || `${fieldValue.label} was not established by the local inspection.`,
+    source: 'local-inspection',
+    targetId: fieldValue.classification === 'SAFE_TO_REMOVE' ? fieldValue.id : undefined,
+    confidence: 'high',
+  }))
+}
+
 export async function inspectJpeg(input: LocalInput, signal?: AbortSignal): Promise<BoundaryResult<InspectionResult>> {
   const descriptor = input.descriptor
   if (descriptor.size !== undefined && descriptor.size > JPEG_MAX_INSPECTION_BYTES) return { ok: false, error: { code: 'LIMIT_EXCEEDED', message: 'JPEG input exceeds the inspection size limit.' } }
@@ -325,13 +369,24 @@ export async function inspectJpegStructure(input: LocalInput, signal?: AbortSign
   return { ok: true, value: { ...parsed.value.inventory, sourceFingerprint: sourceHash.value } }
 }
 
+export const jpegContract: AdapterContract = {
+  conformance: jpegConformance,
+  inspect: async (context: ContractOperationContext) => inspectJpeg(context.input, context.signal),
+  planRemoval: async (context: ContractOperationContext, targetIds) => planJpegRemoval(context.input, targetIds, 'contract', context.signal),
+  executeRemoval: async (context, plan, approval) => removeJpegCom(context.input, plan, approval, context.signal),
+  verifyRemoval: async (context, output, plan, approval) => verifyJpegOutputIndependently(context.input, output, plan, approval, context.signal),
+}
+
 export const jpegAdapter: FormatAdapter & { inspect: typeof inspectJpeg } = {
   id: 'jpeg-inspection',
   role: 'transformer',
   formatId: 'jpeg', engineId: 'notrace-jpeg', engineVersion: '1', capabilityKey: 'jpeg:remove-com', verifierCompatibilityKey: 'notrace-jpeg-com-v1', verificationCheckIds: verificationNames,
   probe: async (input, signal) => { const prefix = await probePrefix(input, 2, signal); if (!prefix.ok) return prefix; return prefix.value.length === 2 && prefix.value[0] === 0xff && prefix.value[1] === 0xd8 ? { ok: true, value: { formatId: 'jpeg', mediaType: 'image/jpeg', confidence: 'structural' as const } } : { ok: false, error: { code: 'UNSUPPORTED' as const, message: 'Input is not a JPEG stream.' } } },
   capability: { extensions: ['jpg', 'jpeg'], mimeTypes: ['image/jpeg'], operations: ['inspect', 'remove'] },
-  inspect: inspectJpeg,
-  planRemoval: planJpegRemoval,
-  remove: removeJpegCom,
+  conformance: jpegConformance,
+  evidence: jpegEvidenceFromInspection,
+  contract: jpegContract,
+  inspect: (input, signal) => jpegContract.inspect!({ input, descriptor: input.descriptor, signal }),
+  planRemoval: (input, targetIds, policy, signal) => jpegContract.planRemoval!({ input, descriptor: input.descriptor, signal }, targetIds),
+  remove: (input, plan, approval, signal) => jpegContract.executeRemoval!({ input, descriptor: input.descriptor, signal }, plan, approval),
 }

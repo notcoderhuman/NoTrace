@@ -5,6 +5,7 @@ import type { ContentProbe } from '../domain/probe'
 import type { LocalInput } from '../domain/input'
 import type { InspectionResult } from '../domain/metadata'
 import type { ProcessingResult, RemovalPlan } from '../domain/operation'
+import type { AdapterContract, AdapterConformance, EvidenceRecord } from '../domain/contracts'
 
 export type AdapterCapability = Readonly<{
   extensions: readonly string[]
@@ -24,6 +25,9 @@ export type FormatAdapter = Readonly<{
   verificationCheckIds?: readonly string[]
   probe?: (input: LocalInput, signal?: AbortSignal) => Promise<BoundaryResult<ContentProbe>>
   capability: AdapterCapability
+  conformance?: AdapterConformance
+  evidence?: (result: InspectionResult) => readonly EvidenceRecord[]
+  contract?: AdapterContract
   inspect?: (input: LocalInput, signal?: AbortSignal) => Promise<BoundaryResult<InspectionResult>>
   planRemoval?: (input: LocalInput, targetIds: readonly string[], policy: string, signal?: AbortSignal) => Promise<BoundaryResult<RemovalPlan>>
   remove?: (input: LocalInput, plan: RemovalPlan, approval: import('../domain/operation').RemovalApproval, signal?: AbortSignal) => Promise<BoundaryResult<ProcessingResult>>

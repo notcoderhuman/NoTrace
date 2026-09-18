@@ -21,7 +21,7 @@
     "test:artifact": "echo [Artifact lifecycle] && tsx lib/processing-core/domain/artifact.test.ts",
     "test:ownership": "echo [Ownership FSM] && tsx lib/processing-core/domain/ownership.test.ts",
     "test:provider-lifecycle": "echo [Provider artifact lifecycle] && tsx components/notrace/provider-lifecycle.test.ts",
-    "test:contracts": "echo [Core contracts] && tsx lib/processing-core/domain/contracts.test.ts",
+    "test:contracts": "echo [Core contracts] && tsx lib/processing-core/domain/contracts.test.ts && tsx lib/processing-core/adapters/jpeg-contract.test.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {

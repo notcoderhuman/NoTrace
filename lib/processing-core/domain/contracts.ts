@@ -38,7 +38,7 @@ export type EvidenceRecord = Readonly<{
 export type ResourceMeasurementState = 'measured' | 'inferred' | 'unmeasured'
 export type ResourceContract = Readonly<{
   inputBound: Readonly<{ maxBytes: number; state: ResourceMeasurementState }>
-  fullBufferOperations: Readonly<{ expected: number; state: ResourceMeasurementState }>
+  fullBufferOperations: Readonly<{ expected?: number; state: ResourceMeasurementState }>
   streaming: Readonly<{ supported: boolean; state: ResourceMeasurementState }>
   worker: Readonly<{ required: boolean; state: ResourceMeasurementState }>
   transfer: Readonly<{ transferable: boolean; copies: boolean; state: ResourceMeasurementState }>
