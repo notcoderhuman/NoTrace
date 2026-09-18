@@ -23,9 +23,9 @@ test('real removal verifies, downloads, and preserves the source fixture', async
   await expect(dialog).toBeVisible()
   await expect(dialog).toContainText('JPEG comments only')
   await dialog.getByRole('button', { name: 'Remove and verify' }).click()
-  const verifiedOutput = page.getByRole('heading', { name: 'Verified locally' })
+  const verifiedOutput = page.getByRole('heading', { name: 'Verified output is ready in memory.' })
   await expect(verifiedOutput).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByText('INDEPENDENT VERIFICATION')).toBeVisible()
+  await expect(page.locator('.verification-stage').getByText('INDEPENDENT VERIFICATION')).toBeVisible()
   await expect(page.getByText('Passed', { exact: true })).toBeVisible()
   await expect(page.getByRole('button', { name: 'Download verified JPEG' })).toBeVisible()
 
