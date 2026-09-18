@@ -37,10 +37,11 @@ type VerifiedProcessingResult = Omit<ProcessingResult, 'output'> & { output: Ver
 type ProcessingPresentationState = Readonly<{ result?: SafeProcessingProjection; verification?: VerificationResult }>
 type RemovalState =
   | { fileId: string; status: 'idle' | 'planning' }
-  | { fileId: string; status: 'ready' | 'approval-pending'; plan: RemovalPlan; selectedTargetIds: readonly string[] }
+  | { fileId: string; status: 'ready' | 'ready-empty' | 'approval-pending'; plan: RemovalPlan; selectedTargetIds: readonly string[] }
   | { fileId: string; status: 'processing'; plan: RemovalPlan; selectedTargetIds: readonly string[] }
   | { fileId: string; status: 'success'; plan: RemovalPlan; selectedTargetIds: readonly string[]; result: VerifiedProcessingResult }
-  | { fileId: string; status: 'unsupported' | 'failed'; error: BoundaryError }
+  | { fileId: string; status: 'unsupported'; error: BoundaryError }
+  | { fileId: string; status: 'failed' | 'cancelled'; plan?: RemovalPlan; selectedTargetIds?: readonly string[]; error: BoundaryError }
 
 export type RemovalOperation = Readonly<{ fileId: string; inputId: string; generation: number; controller: AbortController; signal: AbortSignal }>
 export type RemovalLifecycleController = Readonly<{
@@ -304,7 +305,7 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
         if (targetIds.length) result = await planningBoundary.current!.planRemoval({ input, fieldIds: targetIds, policy: 'jpeg-com' }, { signal: controller.signal })
       }
       if (!removalLifecycle.current.isCurrent(operation, fileId, input.descriptor.id) || controller.signal.aborted || requestId !== removalRequest.current || selectedId !== fileId || localInputs.current.get(fileId) !== input) return
-      if (result.ok) setRemoval({ fileId, status: result.value.status === 'ready' ? 'ready' : 'idle', plan: result.value, selectedTargetIds: [] } as RemovalState)
+      if (result.ok) setRemoval({ fileId, status: result.value.status === 'ready' ? (result.value.removableTargetIds.length ? 'ready' : 'ready-empty') : 'idle', plan: result.value, selectedTargetIds: [] } as RemovalState)
       else setRemoval({ fileId, status: result.error.code === 'UNSUPPORTED' ? 'unsupported' : 'failed', error: result.error })
     })().catch(() => {
       if (!controller.signal.aborted && removalLifecycle.current.isCurrent(operation, fileId, input.descriptor.id) && selectedId === fileId && localInputs.current.get(fileId) === input) setRemoval({ fileId, status: 'failed', error: { code: 'PROCESSING_FAILED', message: 'Local removal planning could not be completed.' } })
@@ -333,7 +334,7 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
       if (completion.kind === 'success' && completion.artifact && result.ok && result.value.output) {
         const { output, ...resultMetadata } = result.value
         setRemoval({ fileId, status: 'success', plan: current.plan, selectedTargetIds: targetIds, result: { ...resultMetadata, output: { filename: output.filename, created: true }, providerOwned: true } })
-      } else setRemoval({ fileId, status: 'failed', error: { code: 'VERIFICATION_FAILED', message: 'Local removal did not pass independent verification.' } })
+      } else setRemoval({ fileId, status: 'failed', plan: current.plan, selectedTargetIds: targetIds, error: { code: result.ok ? 'VERIFICATION_FAILED' : result.error.code, message: result.ok ? 'Local removal did not pass independent verification.' : result.error.message } })
     }).catch(() => {
       if (removalLifecycle.current.isCurrent(operation, fileId, input.descriptor.id) && !controller.signal.aborted && requestId === removalRequest.current && selectedId === fileId && localInputs.current.get(fileId) === input) setRemoval({ fileId, status: 'failed', error: { code: 'PROCESSING_FAILED', message: 'Local removal could not be completed.' } })
     })
@@ -478,9 +479,11 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
   const currentFilePresentation = presentationFiles.find(file => file.id === selectedId)
   const currentRiskAssessment = selected?.demo && currentReport ? mapDemoRisk({ risk: currentReport.risk, partial: currentReport.partial }) : mapRealRisk(inspection && inspection.fileId === selectedId && 'result' in inspection ? inspection.result : undefined)
   const currentProgress = selected?.demo ? mapDemoProgress(busy ? 'processing' : scanning ? 'inspecting' : 'idle', progress) : mapRealProgress(removal?.status === 'processing' ? 'processing' : inspection?.status === 'inspecting' ? 'inspecting' : 'idle')
-  const currentRemovalPresentation = removal && 'plan' in removal ? mapRealRemoval(removal.plan, removal.selectedTargetIds, removal.status === 'success' ? removal.result : undefined) : undefined
+  const currentRemovalPresentation = removal && 'plan' in removal && removal.plan ? mapRealRemoval(removal.plan, removal.selectedTargetIds || [], removal.status === 'success' ? removal.result : undefined) : undefined
   const currentVerification = selected?.demo ? mapDemoVerification(Boolean(currentReport?.partial)) : removal?.status === 'success' ? mapRealVerification(removal.result.verification, { sourceFingerprint: removal.plan.sourceFingerprint, identity: removal.plan.identity }) : mapRealVerification()
-  const currentReportPresentation = selected?.demo && currentReport ? mapDemoReport(currentReport) : undefined
+  const realInspection = inspection && inspection.fileId === selectedId && 'result' in inspection ? inspection.result : undefined
+  const realFindings = realInspection ? mapRealInspection(realInspection).findings : []
+  const currentReportPresentation = selected?.demo && currentReport ? mapDemoReport(currentReport) : selected && !selected.demo && realInspection ? mapRealReport({ filename: selected.name, format: selected.format, size: localFiles.current.get(selected.id)?.size }, realFindings, currentRemovalPresentation, currentVerification) : undefined
   return <Prototype.Provider value={{ files, selected, previewUrl, previewError, setPreviewError, selectFile, addFiles, loadDemo, reports, currentReport, presentationFiles, currentFilePresentation, currentRiskAssessment, currentProgress, currentRemovalPresentation, currentVerification, currentReportPresentation, progress, busy, scanning, scenario, setScenario, run, clearSession, inspection, retryInspection, cancelInspection, removal, planRealRemoval, setRemovalTargets, approveAndProcessRemoval, downloadVerifiedRemoval,
     drafts: allDrafts[selectedId] || {}, setDraft: (key, value) => setAllDrafts(old => ({ ...old, [selectedId]: { ...old[selectedId], [key]: value } })),
     removeFile: id => { if (running.current) return; if (selectedId === id) inspectionAbort.current?.abort(); removalAbort.current?.abort(); artifactOwnership.current.remove(id); releaseLocalInput(localInputs.current.get(id)); localInputs.current.delete(id); localFiles.current.delete(id); if (inspection?.fileId === id) setInspection(undefined); if (removal?.fileId === id) setRemoval(undefined); setFiles(old => old.filter(f => f.id !== id)); if (selectedId === id) selectFile(files.find(f => f.id !== id)?.id || '') },
