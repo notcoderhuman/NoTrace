@@ -45,7 +45,7 @@ test.describe('NoTrace browser integrity and privacy guards', () => {
     await page.goto('/inspect')
     await admit(page, 'integrity-browse.jpg')
     await expect(page.getByRole('img', { name: /privacy risk \d+ out of 100/i })).toBeVisible()
-    await expect(page.getByText(/notrace-metadata-exposure v1/i)).toBeVisible()
+    await expect(page.locator('.inspect-risk').getByText('Methodology: notrace-metadata-exposure v1')).toBeVisible()
   })
 
   test('detects no runtime errors and sends no data-bearing external request during drag inspection', async ({ page }) => {
@@ -79,8 +79,8 @@ test.describe('NoTrace browser integrity and privacy guards', () => {
     await expect(page.getByRole('button', { name: 'Select file-b.jpg' })).toBeVisible({ timeout: 10_000 })
     await expect(page.getByRole('button', { name: 'Select file-b.jpg' })).toHaveAttribute('aria-pressed', 'true')
     await expect(page.getByRole('button', { name: 'Select file-a.jpg' })).toHaveAttribute('aria-pressed', 'false')
-    await expect(page.getByRole('heading', { name: 'file-b.jpg' })).toBeVisible()
-    await expect(page.getByText(/notrace-metadata-exposure v1/i)).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('#inspect-source-title')).toHaveText('file-b.jpg')
+    await expect(page.locator('.inspect-risk').getByText('Methodology: notrace-metadata-exposure v1')).toBeVisible({ timeout: 15_000 })
   })
 
   test('exposes a retryable failed state for malformed JPEG bytes', async ({ page }) => {

@@ -8,7 +8,7 @@ const fixtureBytes = readFileSync(fixturePath)
 async function expectLocalInspection(page: Page) {
   await expect(page.getByRole('heading', { name: 'Under the surface' })).toBeVisible({ timeout: 15_000 })
   await expect(page.getByRole('img', { name: /privacy risk \d+ out of 100/i })).toBeVisible()
-  await expect(page.getByText(/notrace-metadata-exposure v1/i)).toBeVisible()
+  await expect(page.locator('.inspect-risk').getByText('Methodology: notrace-metadata-exposure v1')).toBeVisible()
 }
 
 test.describe('NoTrace local file flows', () => {

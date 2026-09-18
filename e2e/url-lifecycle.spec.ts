@@ -23,7 +23,9 @@ test('verified removal download accounts for object URL cleanup', async ({ page 
   await page.getByRole('checkbox', { name: /JPEG comment/i }).first().check()
   await page.getByRole('button', { name: 'Remove and verify' }).first().click()
   await page.getByRole('dialog', { name: 'Review local removal' }).getByRole('button', { name: 'Remove and verify' }).click()
-  await expect(page.getByRole('heading', { name: 'Verified output is ready in memory.' })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('heading', { name: 'Verified locally' })).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('.verification-stage').getByText('INDEPENDENT VERIFICATION')).toBeVisible()
+  await expect(page.getByText('Passed', { exact: true })).toBeVisible()
   const downloadPromise = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Download verified JPEG' }).click()
   const download = await downloadPromise
@@ -46,7 +48,9 @@ test('two rapid verified downloads each complete', async ({ page }) => {
   await page.getByRole('checkbox', { name: /JPEG comment/i }).first().check()
   await page.getByRole('button', { name: 'Remove and verify' }).first().click()
   await page.getByRole('dialog', { name: 'Review local removal' }).getByRole('button', { name: 'Remove and verify' }).click()
-  await expect(page.getByRole('heading', { name: 'Verified output is ready in memory.' })).toBeVisible({ timeout: 15_000 })
+  await expect(page.getByRole('heading', { name: 'Verified locally' })).toBeVisible({ timeout: 15_000 })
+  await expect(page.locator('.verification-stage').getByText('INDEPENDENT VERIFICATION')).toBeVisible()
+  await expect(page.getByText('Passed', { exact: true })).toBeVisible()
   const first = page.waitForEvent('download')
   await page.getByRole('button', { name: 'Download verified JPEG' }).click()
   const firstDownload = await first
