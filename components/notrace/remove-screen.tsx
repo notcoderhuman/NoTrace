@@ -56,8 +56,8 @@ function RealRemoveScreen() {
   const selectedTargetIds = removal && 'selectedTargetIds' in removal && removal.fileId === fileId ? removal.selectedTargetIds : []
   const currentRemoval = removal?.fileId === fileId ? removal : undefined
   const status = currentRemoval?.status || 'idle'
-  const realRemoval = currentRemoval && 'plan' in currentRemoval ? mapRealRemoval(currentRemoval.plan, currentRemoval.selectedTargetIds) : undefined
   const successResult = currentRemoval?.status === 'success' ? currentRemoval.result : undefined
+  const realRemoval = currentRemoval && 'plan' in currentRemoval ? mapRealRemoval(currentRemoval.plan, currentRemoval.selectedTargetIds, successResult) : undefined
   const success = Boolean(realRemoval?.state === 'verified' && successResult && successResult.outputVerification === 'passed' && successResult.output?.created === true)
   const message = status === 'idle' ? 'Preparing the local removal plan…' : status === 'planning' ? 'Preparing the local JPEG plan…' : status === 'processing' ? 'Removing selected JPEG comments locally…' : status === 'unsupported' ? 'This local file is not a supported JPEG.' : status === 'failed' ? 'Local JPEG removal could not be completed.' : undefined
   const toggle = (id: string, checked: boolean) => setRemovalTargets(fileId, checked ? [...selectedTargetIds, id] : selectedTargetIds.filter(targetId => targetId !== id))

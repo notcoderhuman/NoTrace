@@ -1,5 +1,6 @@
 import type { DemoFile, DemoReport, MetadataItem } from '../notrace-demo'
 import type { RemovalTargetViewModel, ReportViewModel, RiskAssessmentViewModel, UnifiedFileViewModel, UnifiedMetadataViewModel, PrivacyFindingViewModel, ProgressViewModel, VerificationViewModel } from './models'
+import { scoreRisk } from './risk-scoring'
 
 function classification(value: MetadataItem['capability']): UnifiedMetadataViewModel['classification'] {
   if (value === 'Safe to remove') return 'removable'
@@ -24,7 +25,8 @@ export function mapDemoFindings(items: readonly MetadataItem[]): PrivacyFindingV
 }
 
 export function mapDemoRisk(report: Pick<DemoReport, 'risk' | 'partial'>): RiskAssessmentViewModel {
-  return { state: report.partial ? 'PARTIAL' : 'AVAILABLE', score: report.risk, level: report.risk >= 70 ? 'High' : report.risk >= 40 ? 'Medium' : 'Low', reasons: ['Illustrative demo assessment.'], contributingFindingIds: [], confidence: 'unknown', methodology: { id: 'notrace-demo', version: '1' }, source: 'demo' }
+  const assessment = scoreRisk([{ id: 'demo-exposure', category: 'GENERAL_EXIF', state: 'PRESENT' }], 'demo', { methodologyId: 'notrace-demo', methodologyVersion: '1' })
+  return { ...assessment, state: report.partial ? 'PARTIAL' : 'AVAILABLE', score: report.risk, reasons: ['Illustrative demo assessment.'] }
 }
 
 export function mapDemoProgress(state: ProgressViewModel['state'], percentage: number, detail?: string): ProgressViewModel { return { state, mode: 'determinate', percentage: Math.max(0, Math.min(100, percentage)), label: state.replaceAll('-', ' '), detail } }

@@ -83,12 +83,16 @@ test.describe('NoTrace browser integrity and privacy guards', () => {
     await expect(page.getByText(/notrace-metadata-exposure v1/i)).toBeVisible({ timeout: 15_000 })
   })
 
-  test('does not present malformed JPEG bytes as a valid inspected result', async ({ page }) => {
+  test('exposes a retryable failed state for malformed JPEG bytes', async ({ page }) => {
     await page.goto('/inspect')
     const malformed = new Uint8Array([0xff, 0xd8, 0xff, 0xe1, 0, 20, 0x45])
     await page.locator('input[aria-label="Choose local JPEG files"]').setInputFiles({ name: 'malformed.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(malformed) })
     await expect(page.getByRole('button', { name: 'Select malformed.jpg' })).toBeVisible({ timeout: 10_000 })
     await expect(page.getByText(/inspection could not be completed/i)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('button', { name: 'Retry inspection' })).toBeVisible()
+    await page.getByRole('button', { name: 'Retry inspection' }).click()
+    await expect(page.getByText(/inspection could not be completed/i)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByRole('button', { name: 'Retry inspection' })).toBeVisible()
     await expect(page.getByRole('img', { name: /privacy risk — out of 100/i })).toHaveCount(0)
   })
 })

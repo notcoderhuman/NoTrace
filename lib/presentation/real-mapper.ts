@@ -2,10 +2,28 @@ import type { InspectionResult } from '../processing-core/domain/metadata'
 import type { RemovalPlan, ProcessingResult } from '../processing-core/domain/operation'
 import type { VerificationResult } from '../processing-core/domain/result'
 import type { ProgressViewModel, ReportViewModel, RiskAssessmentViewModel, UnifiedFileViewModel, UnifiedMetadataViewModel, PrivacyFindingViewModel, RemovalViewModel, VerificationViewModel } from './models'
+import { scoreRisk, type RiskEvidence } from './risk-scoring'
 
 const categoryLabel: Record<string, string> = { EXIF: 'EXIF', IPTC: 'IPTC', XMP: 'XMP', C2PA: 'C2PA', container: 'Container', other: 'Other' }
 function metadataClass(value: string): UnifiedMetadataViewModel['classification'] { return value === 'SAFE_TO_REMOVE' || value === 'EDITABLE' ? 'removable' : value === 'PROTECTED' ? 'protected' : value === 'UNSUPPORTED' ? 'unsupported' : value === 'UNKNOWN' ? 'unknown' : 'safe' }
 function capability(result: InspectionResult, operation: 'inspect' | 'remove' | 'verify'): UnifiedFileViewModel['capability'][typeof operation] { if (result.status === 'unsupported' || result.format.state === 'unsupported') return 'unavailable'; if (result.status === 'failed') return 'unknown'; return operation === 'inspect' ? 'available' : result.format.state === 'supported' ? 'available' : 'unknown' }
+function riskState(field: InspectionResult['fields'][number]): RiskEvidence['state'] {
+  if (field.classification === 'UNSUPPORTED') return 'UNSUPPORTED'
+  return field.value === undefined ? 'UNKNOWN' : 'PRESENT'
+}
+function riskCategory(field: InspectionResult['fields'][number]): RiskEvidence['category'] {
+  const id = field.id.toLowerCase()
+  if (id === 'icc-profile') return 'ICC'
+  if (id.startsWith('comment-')) return 'JPEG_COM'
+  if (id === 'xmp-present' || field.category === 'XMP') return 'XMP'
+  if (field.category === 'IPTC') return 'IPTC'
+  if (id.includes('gps') || id.includes('location') || id.includes('latitude') || id.includes('longitude')) return 'LOCATION'
+  if (id.includes('camera') || id.includes('device') || id.includes('make') || id.includes('model') || id.includes('lens') || id.includes('serial')) return 'DEVICE'
+  if (id.includes('creator') || id.includes('author') || id.includes('artist')) return 'CREATOR'
+  if (id.includes('timestamp') || id.includes('date') || id.includes('time')) return 'TIMESTAMP'
+  if (id.includes('software') || id.includes('processing')) return 'SOFTWARE'
+  return field.category === 'EXIF' || id === 'exif-present' || id === 'exif-byte-order' ? 'GENERAL_EXIF' : 'GENERAL_EXIF'
+}
 
 export function mapRealInspection(result: InspectionResult): Readonly<{ metadata: UnifiedMetadataViewModel[]; findings: PrivacyFindingViewModel[] }> {
   const metadata: UnifiedMetadataViewModel[] = result.fields.map(field => ({ id: field.id, category: categoryLabel[field.category] || field.category, field: field.label, value: field.value ?? 'Unknown', valueState: field.value === undefined ? 'unknown' : 'present', classification: metadataClass(field.classification), privacyRelevance: field.risk || 'unknown', removable: field.classification === 'SAFE_TO_REMOVE', evidence: { source: 'jpeg-structure' as const, targetId: field.classification === 'SAFE_TO_REMOVE' ? field.id : undefined } }))
@@ -19,7 +37,11 @@ export function mapRealFile(input: Readonly<{ id: string; filename: string; mime
   return { id: input.id, filename: input.filename, format: { id: result?.format.extension, label: result?.format.mimeType || input.mimeType || 'Unknown format', state: formatState }, size: typeof input.size === 'number' ? { bytes: input.size, label: `${input.size} bytes` } : undefined, source: 'real', originalPreserved: true, preview: { state: 'unavailable' }, capability: { inspect: result ? capability(result, 'inspect') : 'unknown', remove: result ? capability(result, 'remove') : 'unknown', verify: result ? capability(result, 'verify') : 'unknown' }, operationState: status === 'success' || status === 'partial' ? 'inspected' : status === 'unsupported' ? 'unsupported' : status === 'failed' ? 'failed' : 'probing' }
 }
 
-export function mapRealRisk(): RiskAssessmentViewModel { return { state: 'NOT_AVAILABLE', reasons: [], contributingFindingIds: [], confidence: 'unknown', methodology: { id: 'not-implemented', version: '1' }, source: 'real' } }
+export function mapRealRisk(result?: InspectionResult): RiskAssessmentViewModel {
+  if (!result || (result.status !== 'success' && result.status !== 'partial')) return scoreRisk([], 'real')
+  const evidence: RiskEvidence[] = result.fields.map(field => ({ id: field.id, category: riskCategory(field), state: riskState(field) }))
+  return scoreRisk(evidence, 'real')
+}
 export function mapRealProgress(state: ProgressViewModel['state'], detail?: string): ProgressViewModel { return { state, mode: 'indeterminate', label: state.replaceAll('-', ' '), detail } }
 
 export type SafeProcessingProjection = Readonly<Pick<ProcessingResult, 'status' | 'outputVerification' | 'removedTargetIds' | 'preservedTargetIds' | 'warnings'> & { output?: Readonly<{ filename: string; created: true }>; verification?: VerificationResult; providerOwned?: true }>

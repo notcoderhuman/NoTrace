@@ -3,13 +3,22 @@ import { metadata, sampleFile } from '../notrace-demo'
 import { mapDemoFile, mapDemoFindings, mapDemoReport } from './demo-mapper'
 import { mapRealFile, mapRealProgress, mapRealRemoval, mapRealRisk, mapRealVerification } from './real-mapper'
 import type { ReportViewModel, UnifiedFileViewModel } from './models'
+import { scoreRisk } from './risk-scoring'
 
 const demo: UnifiedFileViewModel = mapDemoFile(sampleFile)
 const real: UnifiedFileViewModel = mapRealFile({ id: 'same', filename: sampleFile.name, mimeType: 'image/jpeg' })
 assert.equal(demo.source, 'demo')
 assert.equal(real.source, 'real')
 assert.equal(demo.id !== real.id, true)
+const runtimeInspection = { kind: 'inspection' as const, status: 'success' as const, input: { filename: 'real.jpg', mimeType: 'image/jpeg', size: 10 }, format: { extension: 'jpg', mimeType: 'image/jpeg', state: 'supported' as const }, fields: [{ id: 'comment-0', label: 'JPEG comment', category: 'other' as const, classification: 'UNKNOWN' as const, value: 'Present' }, { id: 'icc-profile', label: 'ICC color profile', category: 'other' as const, classification: 'PROTECTED' as const, value: 'Present' }, { id: 'gps-latitude', label: 'GPS latitude', category: 'EXIF' as const, classification: 'PROTECTED' as const, value: 'Present' }, { id: 'camera-model', label: 'Camera model', category: 'EXIF' as const, classification: 'PROTECTED' as const, value: 'Present' }], warnings: [], analyzed: true as const }
+assert.equal(mapRealRisk(runtimeInspection).source, 'real')
+assert.equal(mapRealRisk(runtimeInspection).score, 61)
+assert.equal(typeof mapRealRisk(runtimeInspection).score, 'number')
+assert.equal(mapRealRisk(runtimeInspection).state, 'AVAILABLE')
+assert.equal(mapRealRisk(runtimeInspection).methodology.id, 'notrace-metadata-exposure')
+assert.equal(mapRealRisk(runtimeInspection).methodology.version, '1')
 assert.equal(mapRealRisk().state, 'NOT_AVAILABLE')
+assert.equal(scoreRisk([{ id: 'zero', category: 'GENERAL_EXIF', state: 'NOT_DETECTED' }], 'real').score, 0)
 assert.equal(mapRealProgress('processing').mode, 'indeterminate')
 assert.equal(mapRealProgress('processing').percentage, undefined)
 assert.equal(mapRealVerification().provenance, 'real')

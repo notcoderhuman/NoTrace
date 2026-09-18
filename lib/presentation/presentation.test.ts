@@ -3,6 +3,7 @@ import { metadata, sampleFile, type DemoReport } from '../notrace-demo'
 import { mapDemoFile, mapDemoFindings, mapDemoMetadata, mapDemoProgress, mapDemoReport, mapDemoRisk, mapDemoVerification } from './demo-mapper'
 import { mapRealFile, mapRealInspection, mapRealProgress, mapRealRemoval, mapRealReport, mapRealRisk, mapRealVerification } from './real-mapper'
 import { deriveReportCounts } from './models'
+import { classifyRisk, scoreRisk } from './risk-scoring'
 
 const demoFile = mapDemoFile(sampleFile)
 assert.equal(demoFile.source, 'demo')
@@ -20,6 +21,22 @@ const realInspection = mapRealInspection(inspection)
 assert.equal(realInspection.findings[0].status, 'UNKNOWN')
 assert.notEqual(realInspection.findings[0].status, 'NOT_DETECTED')
 assert.equal(mapRealRisk().state, 'NOT_AVAILABLE')
+assert.equal(scoreRisk([{ id: 'exif', category: 'GENERAL_EXIF', state: 'PRESENT' }], 'real').source, 'real')
+assert.equal(scoreRisk([{ id: 'icc', category: 'ICC', state: 'PRESENT' }, { id: 'com', category: 'JPEG_COM', state: 'PRESENT' }], 'real').score, 6)
+assert.equal(scoreRisk([{ id: 'gps', category: 'LOCATION', state: 'PRESENT' }], 'real').score, 35)
+assert.equal(scoreRisk([{ id: 'device', category: 'DEVICE', state: 'PRESENT' }], 'real').score, 20)
+assert.equal(scoreRisk([{ id: 'creator', category: 'CREATOR', state: 'PRESENT' }], 'real').score, 15)
+assert.equal(scoreRisk([{ id: 'time', category: 'TIMESTAMP', state: 'PRESENT' }], 'real').score, 10)
+assert.equal(scoreRisk([{ id: 'software', category: 'SOFTWARE', state: 'PRESENT' }], 'real').score, 5)
+assert.equal(scoreRisk([{ id: 'iptc', category: 'IPTC', state: 'PRESENT' }, { id: 'xmp', category: 'XMP', state: 'PRESENT' }], 'real').score, 15)
+assert.equal(scoreRisk([{ id: 'gps', category: 'LOCATION', state: 'UNKNOWN' }], 'real').state, 'PARTIAL')
+assert.equal(scoreRisk([{ id: 'x', category: 'XMP', state: 'UNSUPPORTED' }], 'real').score, 0)
+assert.equal(scoreRisk([{ id: 'x', category: 'XMP', state: 'NOT_DETECTED' }], 'real').score, 0)
+assert.equal(mapRealRisk({ ...inspection, status: 'success', fields: [{ id: 'x', label: 'Unsupported field', category: 'EXIF', classification: 'UNSUPPORTED' }] }).state, 'PARTIAL')
+assert.equal(scoreRisk([{ id: 'x', category: 'GENERAL_EXIF', state: 'PRESENT' }, { id: 'y', category: 'GENERAL_EXIF', state: 'PRESENT' }], 'real').score, 4)
+assert.equal(scoreRisk([{ id: 'a', category: 'GENERAL_EXIF', state: 'PRESENT' }, { id: 'b', category: 'XMP', state: 'PRESENT' }], 'real').level, 'Low')
+assert.deepEqual(scoreRisk([{ id: 'a', category: 'GENERAL_EXIF', state: 'PRESENT' }, { id: 'b', category: 'XMP', state: 'PRESENT' }], 'real'), scoreRisk([{ id: 'b', category: 'XMP', state: 'PRESENT' }, { id: 'a', category: 'GENERAL_EXIF', state: 'PRESENT' }], 'real'))
+for (const [score, level] of [[0, 'Low'], [1, 'Low'], [39, 'Low'], [40, 'Medium'], [41, 'Medium'], [69, 'Medium'], [70, 'High'], [71, 'High'], [100, 'High']] as const) assert.equal(classifyRisk(score), level)
 assert.equal(mapRealProgress('processing').mode, 'indeterminate')
 assert.equal(mapRealProgress('processing').percentage, undefined)
 assert.equal(mapRealVerification().provenance, 'real')

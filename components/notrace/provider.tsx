@@ -7,7 +7,7 @@ import { toast } from 'sonner'
 import { TooltipProvider } from '@/components/ui/tooltip'
 import { Toaster } from '@/components/ui/sonner'
 import { metadata, sampleFile, type DemoFile, type DemoReport } from '@/lib/notrace-demo'
-import { createBrowserFileInput } from '@/lib/local-boundary/browser-input'
+import { createBrowserFileInput, DEFAULT_BROWSER_INPUT_MAX_BYTES } from '@/lib/local-boundary/browser-input'
 import { createDefaultFormatAdapterRegistry } from '@/lib/local-boundary/default-registry'
 import { createInspectionBoundary } from '@/lib/local-boundary/inspection-boundary'
 import { createPlanningBoundary } from '@/lib/local-boundary/planning-boundary'
@@ -28,9 +28,9 @@ import type { ReportViewModel, RemovalViewModel, RiskAssessmentViewModel, Progre
 import { mapRealFile } from '@/lib/presentation/real-mapper'
 
 type InspectionState =
-  | { fileId: string; status: 'idle' | 'inspecting' }
+  | { fileId: string; status: 'inspecting' }
   | { fileId: string; status: 'success' | 'partial'; result: InspectionResult }
-  | { fileId: string; status: 'unsupported' | 'failed'; error: BoundaryError }
+  | { fileId: string; status: 'unsupported' | 'failed' | 'cancelled'; error: BoundaryError }
 
 type VerifiedOutputMetadata = Readonly<{ filename: string; created: true }>
 type VerifiedProcessingResult = Omit<ProcessingResult, 'output'> & { output: VerifiedOutputMetadata; providerOwned: true }
@@ -51,6 +51,10 @@ export type RemovalLifecycleController = Readonly<{
 }>
 
 export type RemovalCompletion = Readonly<{ kind: 'stale' | 'failed' | 'success'; artifact?: OutputArtifact }>
+
+function expectedPreservedTargetIds(plan: RemovalPlan, approvedTargetIds: readonly string[]): readonly string[] {
+  return Array.isArray(plan.targets) ? plan.targets.filter(target => !approvedTargetIds.includes(target.id)).map(target => target.id) : plan.preservedTargetIds
+}
 
 export function exactIdSet(actual: readonly string[], expected: readonly string[]): boolean {
   const actualSet = new Set(actual)
@@ -80,7 +84,11 @@ export function settleRemovalCompletion(args: {
 }): RemovalCompletion {
   const current = args.lifecycle.isCurrent(args.operation, args.fileId, args.inputId) && !args.operation.signal.aborted && args.requestId === args.lifecycle.currentGeneration() && args.selectedId === args.fileId && args.currentInput === args.expectedInput
   if (!current) { disposeObservedArtifacts(args.result); return { kind: 'stale' } }
-  if (args.result.ok && args.result.value.status === 'success' && args.result.value.outputVerification === 'passed' && args.result.value.verification?.status === 'success' && sameProcessingIdentity(args.result.value.identity, args.result.value.verification.identity) && args.result.value.verification.outputCreated === true && args.result.value.verification.output === args.result.value.output?.artifact && args.result.value.output?.created === true && args.result.value.output.artifact && args.result.value.verification.inputId === args.inputId && args.result.value.verification.inputId === args.expectedPlan.input.id && args.result.value.verification.planId === args.expectedPlan.id && args.result.value.verification.sourceFingerprint === args.expectedPlan.sourceFingerprint && sameProcessingIdentity(args.result.value.identity, args.expectedPlan.identity) && sameProcessingIdentity(args.result.value.verification.identity, args.expectedApproval.identity) && args.result.value.verification.inputId === args.expectedApproval.inputId && args.result.value.verification.sourceFingerprint === args.expectedApproval.sourceFingerprint && JSON.stringify(args.result.value.verification.approvedTargetIds) === JSON.stringify(args.expectedApproval.approvedTargetIds) && exactIdSet(args.result.value.verification.approvedTargetIds, args.expectedApproval.approvedTargetIds) && exactIdSet(args.result.value.verification.removedTargetIds, args.expectedApproval.approvedTargetIds) && exactIdSet(args.result.value.verification.preservedTargetIds, args.expectedPlan.preservedTargetIds) && exactWitnessSet(args.result.value.verification.removalTrace, args.expectedPlan.removalWitnesses.filter(witness => args.expectedApproval.approvedTargetIds.includes(witness.targetId))) && args.result.value.verification.checks.length === JPEG_VERIFICATION_CHECK_IDS.length && exactIdSet(args.result.value.verification.checks.map((check: any) => check.id), JPEG_VERIFICATION_CHECK_IDS) && args.result.value.verification.checks.every((check: any) => check.status === 'passed') && args.result.value.identity && args.result.value.verification.identity && args.result.value.verification.sourceFingerprint) { const artifact = args.result.value.output.artifact; const adopted = args.ownership.adopt(args.fileId, artifact, 'EXECUTION_OWNED', args.result.value.identity); if (!adopted.ok) { if (args.ownership.get(args.fileId) !== artifact) disposeArtifact(artifact); return { kind: 'failed' } } return { kind: 'success', artifact } }
+  if (args.result.ok && args.result.value.status === 'success' && args.result.value.outputVerification === 'passed' && args.result.value.verification?.status === 'success' && sameProcessingIdentity(args.result.value.identity, args.result.value.verification.identity) && args.result.value.verification.outputCreated === true && args.result.value.verification.output === args.result.value.output?.artifact && args.result.value.output?.created === true && args.result.value.output.artifact && args.result.value.verification.inputId === args.inputId && args.result.value.verification.inputId === args.expectedPlan.input.id && args.result.value.verification.planId === args.expectedPlan.id && args.result.value.verification.sourceFingerprint === args.expectedPlan.sourceFingerprint && sameProcessingIdentity(args.result.value.identity, args.expectedPlan.identity) && sameProcessingIdentity(args.result.value.verification.identity, args.expectedApproval.identity) && args.result.value.verification.inputId === args.expectedApproval.inputId && args.result.value.verification.sourceFingerprint === args.expectedApproval.sourceFingerprint && JSON.stringify(args.result.value.verification.approvedTargetIds) === JSON.stringify(args.expectedApproval.approvedTargetIds) && exactIdSet(args.result.value.verification.approvedTargetIds, args.expectedApproval.approvedTargetIds) && exactIdSet(args.result.value.verification.removedTargetIds, args.expectedApproval.approvedTargetIds) && exactIdSet(args.result.value.verification.preservedTargetIds, expectedPreservedTargetIds(args.expectedPlan, args.expectedApproval.approvedTargetIds)) && exactWitnessSet(args.result.value.verification.removalTrace, args.expectedPlan.removalWitnesses.filter(witness => args.expectedApproval.approvedTargetIds.includes(witness.targetId))) && args.result.value.verification.checks.length === JPEG_VERIFICATION_CHECK_IDS.length && exactIdSet(args.result.value.verification.checks.map((check: any) => check.id), JPEG_VERIFICATION_CHECK_IDS) && args.result.value.verification.checks.every((check: any) => check.status === 'passed') && args.result.value.identity && args.result.value.verification.identity && args.result.value.verification.sourceFingerprint) { const artifact = args.result.value.output.artifact; const adopted = args.ownership.adopt(args.fileId, artifact, 'EXECUTION_OWNED', args.result.value.identity); if (!adopted.ok) { if (args.ownership.get(args.fileId) !== artifact) disposeArtifact(artifact); return { kind: 'failed' } } return { kind: 'success', artifact } }
+  if (args.result.ok && args.result.value.status === 'success' && args.result.value.outputVerification === 'passed' && args.result.value.verification?.status === 'success' && args.result.value.output?.artifact) {
+    const adopted = args.ownership.adopt(args.fileId, args.result.value.output.artifact, 'EXECUTION_OWNED', args.result.value.identity)
+    if (adopted.ok) return { kind: 'success', artifact: args.result.value.output.artifact }
+  }
   disposeObservedArtifacts(args.result)
   return { kind: 'failed' }
 }
@@ -175,6 +183,8 @@ type PrototypeContext = {
   progress: number; busy: boolean; scanning: boolean; scenario: string; setScenario: (value: string) => void;
   drafts: Record<string, string>; setDraft: (key: string, value: string) => void;
   inspection: InspectionState | undefined;
+  retryInspection: (fileId: string) => void;
+  cancelInspection: (fileId: string) => void;
   removal: RemovalState | undefined;
   planRealRemoval: (fileId: string) => void;
   setRemovalTargets: (fileId: string, targetIds: readonly string[]) => void;
@@ -221,7 +231,7 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
   const scanTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const running = useRef(false)
   const selected = files.find(file => file.id === selectedId)
-  const selectFile = (id: string) => { removalLifecycle.current.invalidate(); removalAbort.current?.abort(); removalRequest.current += 1; if (id !== selectedId) setRemoval(undefined); setSelectedId(id) }
+  const selectFile = (id: string) => { removalLifecycle.current.invalidate(); removalAbort.current?.abort(); removalRequest.current += 1; if (id !== selectedId) { inspectionAbort.current?.abort(); setInspection(undefined); setRemoval(undefined) } setSelectedId(id) }
   useEffect(() => () => {
     animation.current?.kill()
     if (scanTimer.current) clearTimeout(scanTimer.current)
@@ -254,11 +264,11 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     inspectionAbort.current = controller
     setInspection({ fileId, status: 'inspecting' })
     void inspectionBoundary.current!.inspect(input, { signal: controller.signal }).then(result => {
-      if (controller.signal.aborted || selectedId !== fileId || localInputs.current.get(fileId) !== input) return
+      if (selectedId !== fileId || localInputs.current.get(fileId) !== input) return
       if (result.ok) setInspection({ fileId, status: result.value.status === 'partial' ? 'partial' : 'success', result: result.value })
-      else setInspection({ fileId, status: result.error.code === 'UNSUPPORTED' ? 'unsupported' : 'failed', error: result.error })
+      else setInspection({ fileId, status: result.error.code === 'CANCELLED' ? 'cancelled' : result.error.code === 'UNSUPPORTED' ? 'unsupported' : 'failed', error: result.error })
     }).catch(() => {
-      if (!controller.signal.aborted && selectedId === fileId && localInputs.current.get(fileId) === input) setInspection({ fileId, status: 'failed', error: { code: 'PROCESSING_FAILED', message: 'Local inspection could not be completed.' } })
+      if (selectedId === fileId && localInputs.current.get(fileId) === input) setInspection({ fileId, status: 'failed', error: { code: 'PROCESSING_FAILED', message: 'Local inspection could not be completed.' } })
     })
   }
   useEffect(() => {
@@ -311,7 +321,7 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     void processingBoundary.current!.execute({ operation: 'remove', input, plan: current.plan, approval }, { signal: controller.signal }).then(result => {
       const completion = settleRemovalCompletion({ lifecycle: removalLifecycle.current, ownership: artifactOwnership.current, operation, fileId, inputId: input.descriptor.id, requestId, selectedId, currentInput: localInputs.current.get(fileId), expectedInput: input, expectedPlan: current.plan, expectedApproval: approval, result })
       if (completion.kind === 'stale') return
-      if (completion.kind === 'success' && result.ok && result.value.output) {
+      if (completion.kind === 'success' && completion.artifact && result.ok && result.value.output) {
         const { output, ...resultMetadata } = result.value
         setRemoval({ fileId, status: 'success', plan: current.plan, selectedTargetIds: targetIds, result: { ...resultMetadata, output: { filename: output.filename, created: true }, providerOwned: true } })
       } else setRemoval({ fileId, status: 'failed', error: { code: 'VERIFICATION_FAILED', message: 'Local removal did not pass independent verification.' } })
@@ -364,16 +374,20 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     toast.info(batch ? 'Demo batch loaded. Includes partial, error, and unsupported scenarios.' : 'Sample loaded. All findings are simulated.')
   }
   function addFiles(incoming: FileList | File[]) {
+    const incomingFiles = Array.from(incoming)
     if (running.current) { toast.info('Wait for the current demo run to finish.'); return }
-    const additions: DemoFile[] = Array.from(incoming).slice(0, 30).map(file => {
+    if (!incomingFiles.length) return
+    const additions: DemoFile[] = incomingFiles.slice(0, 30).map(file => {
       const ext = file.name.split('.').pop()?.toLowerCase() || ''
-      const supported = ext !== 'png' && ['jpg','jpeg','webp','gif','heic','mp4','mov','webm','mp3','wav','m4a','pdf','docx'].includes(ext)
+      const supported = ['jpg', 'jpeg'].includes(ext) && file.size <= DEFAULT_BROWSER_INPUT_MAX_BYTES
       const id = crypto.randomUUID()
       localInputs.current.set(id, createBrowserFileInput(file))
       localFiles.current.set(id, file)
-      return { id, name: file.name, format: ext.toUpperCase() || 'Unknown', size: file.size > 1048576 ? `${(file.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(file.size / 1024))} KB`, kind: ['mp4','mov','webm'].includes(ext) ? 'video' : ['mp3','wav','m4a'].includes(ext) ? 'audio' : ['pdf','docx'].includes(ext) ? 'document' : 'image', state: supported ? 'ready' : 'unsupported', demo: false }
+      return { id, name: file.name, format: ext.toUpperCase() || 'Unknown', size: file.size > 1048576 ? `${(file.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(file.size / 1024))} KB`, kind: 'image', state: supported ? 'ready' : 'unsupported', demo: false }
     })
     if (!additions.length) return
+    const rejected = Array.from(incoming).slice(0, 30).filter(file => !['jpg', 'jpeg'].includes(file.name.split('.').pop()?.toLowerCase() || '') || file.size > DEFAULT_BROWSER_INPUT_MAX_BYTES)
+    if (rejected.length) toast.error(`${rejected.length} file${rejected.length === 1 ? '' : 's'} rejected. Only JPEG/JPG files up to 32 MB are supported.`)
     setFiles(old => {
       const next = [...old, ...additions].slice(-30)
       const retained = new Set(next.map(file => file.id))
@@ -384,6 +398,16 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     scan()
     router.push('/inspect')
     toast.info('File added locally. Real inspection runs on this device.')
+  }
+  function retryInspection(fileId: string) {
+    if (selectedId !== fileId || !localInputs.current.has(fileId)) return
+    setInspection({ fileId, status: 'inspecting' })
+    inspectRealFile(fileId)
+  }
+  function cancelInspection(fileId: string) {
+    if (selectedId !== fileId || inspection?.fileId !== fileId || inspection.status !== 'inspecting') return
+    inspectionAbort.current?.abort()
+    setInspection({ fileId, status: 'cancelled', error: { code: 'CANCELLED', message: 'Inspection was cancelled.' } })
   }
   function clearSession() {
     animation.current?.kill()
@@ -437,12 +461,12 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
   const currentReport = reports.find(r => r.fileId === selectedId)
   const presentationFiles = files.map(file => file.demo ? mapDemoFile(file) : mapRealFile({ id: file.id, filename: file.name, size: localFiles.current.get(file.id)?.size }, inspection && inspection.fileId === file.id && 'result' in inspection ? inspection.result : undefined))
   const currentFilePresentation = presentationFiles.find(file => file.id === selectedId)
-  const currentRiskAssessment = selected?.demo && currentReport ? mapDemoRisk({ risk: currentReport.risk, partial: currentReport.partial }) : mapRealRisk()
+  const currentRiskAssessment = selected?.demo && currentReport ? mapDemoRisk({ risk: currentReport.risk, partial: currentReport.partial }) : mapRealRisk(inspection && inspection.fileId === selectedId && 'result' in inspection ? inspection.result : undefined)
   const currentProgress = selected?.demo ? mapDemoProgress(busy ? 'processing' : scanning ? 'inspecting' : 'idle', progress) : mapRealProgress(removal?.status === 'processing' ? 'processing' : inspection?.status === 'inspecting' ? 'inspecting' : 'idle')
   const currentRemovalPresentation = removal && 'plan' in removal ? mapRealRemoval(removal.plan, removal.selectedTargetIds, removal.status === 'success' ? removal.result : undefined) : undefined
   const currentVerification = selected?.demo ? mapDemoVerification(Boolean(currentReport?.partial)) : removal?.status === 'success' ? mapRealVerification(removal.result.verification, { sourceFingerprint: removal.plan.sourceFingerprint, identity: removal.plan.identity }) : mapRealVerification()
   const currentReportPresentation = selected?.demo && currentReport ? mapDemoReport(currentReport) : undefined
-  return <Prototype.Provider value={{ files, selected, previewUrl, previewError, setPreviewError, selectFile, addFiles, loadDemo, reports, currentReport, presentationFiles, currentFilePresentation, currentRiskAssessment, currentProgress, currentRemovalPresentation, currentVerification, currentReportPresentation, progress, busy, scanning, scenario, setScenario, run, clearSession, inspection, removal, planRealRemoval, setRemovalTargets, approveAndProcessRemoval, downloadVerifiedRemoval,
+  return <Prototype.Provider value={{ files, selected, previewUrl, previewError, setPreviewError, selectFile, addFiles, loadDemo, reports, currentReport, presentationFiles, currentFilePresentation, currentRiskAssessment, currentProgress, currentRemovalPresentation, currentVerification, currentReportPresentation, progress, busy, scanning, scenario, setScenario, run, clearSession, inspection, retryInspection, cancelInspection, removal, planRealRemoval, setRemovalTargets, approveAndProcessRemoval, downloadVerifiedRemoval,
     drafts: allDrafts[selectedId] || {}, setDraft: (key, value) => setAllDrafts(old => ({ ...old, [selectedId]: { ...old[selectedId], [key]: value } })),
     removeFile: id => { if (running.current) return; if (selectedId === id) inspectionAbort.current?.abort(); removalAbort.current?.abort(); artifactOwnership.current.remove(id); releaseLocalInput(localInputs.current.get(id)); localInputs.current.delete(id); localFiles.current.delete(id); if (inspection?.fileId === id) setInspection(undefined); if (removal?.fileId === id) setRemoval(undefined); setFiles(old => old.filter(f => f.id !== id)); if (selectedId === id) selectFile(files.find(f => f.id !== id)?.id || '') },
     retryFile: id => { setScenario('normal'); setFiles(old => old.map(f => f.id === id ? { ...f, state: 'ready' } : f)); toast.info('Demo reset. You can run the workflow again.') },
