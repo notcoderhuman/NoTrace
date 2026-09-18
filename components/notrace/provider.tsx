@@ -23,6 +23,7 @@ import type { ProcessingResult, RemovalApproval, RemovalPlan } from '@/lib/proce
 import { JPEG_VERIFICATION_CHECK_IDS, type BoundaryResult, type VerificationResult } from '@/lib/processing-core/domain/result'
 import { mapDemoProgress, mapDemoReport, mapDemoRisk, mapDemoVerification } from '@/lib/presentation/demo-mapper'
 import { mapRealInspection, mapRealProgress, mapRealRemoval, mapRealReport, mapRealRisk, mapRealVerification, type SafeProcessingProjection } from '@/lib/presentation/real-mapper'
+import { snapshotReport, upsertReportSnapshot } from '@/lib/presentation/report-history'
 import { mapDemoFile } from '@/lib/presentation/demo-mapper'
 import type { ReportViewModel, RemovalViewModel, RiskAssessmentViewModel, ProgressViewModel, UnifiedFileViewModel, VerificationViewModel } from '@/lib/presentation/models'
 import { mapRealFile } from '@/lib/presentation/real-mapper'
@@ -187,7 +188,7 @@ type PrototypeContext = {
   files: DemoFile[]; selected: DemoFile | undefined; previewUrl: string | undefined; previewError: boolean; setPreviewError: (value: boolean) => void; selectFile: (id: string) => void;
   addFiles: (files: FileList | File[]) => void; loadDemo: (batch?: boolean) => void;
   removeFile: (id: string) => void; clearSession: () => void; retryFile: (id: string) => void;
-  reports: DemoReport[]; currentReport: DemoReport | undefined;
+  reports: DemoReport[]; currentReport: DemoReport | undefined; realReports: readonly ReportViewModel[];
   presentationFiles: readonly UnifiedFileViewModel[]; currentFilePresentation: UnifiedFileViewModel | undefined; currentRiskAssessment: RiskAssessmentViewModel; currentProgress: ProgressViewModel; currentRemovalPresentation: RemovalViewModel | undefined; currentVerification: VerificationViewModel; currentReportPresentation: ReportViewModel | undefined;
   run: (policy: string, removed: string[], edits?: Record<string, string>, batch?: boolean) => void;
   progress: number; busy: boolean; scanning: boolean; scenario: string; setScenario: (value: string) => void;
@@ -212,6 +213,7 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
   const [files, setFiles] = useState<DemoFile[]>([])
   const [selectedId, setSelectedId] = useState('')
   const [reports, setReports] = useState<DemoReport[]>([])
+  const [realReports, setRealReports] = useState<readonly ReportViewModel[]>([])
   const [progress, setProgress] = useState(0)
   const [busy, setBusy] = useState(false)
   const [scanning, setScanning] = useState(false)
@@ -438,7 +440,7 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     localFiles.current.clear()
     setInspection(undefined)
     setRemoval(undefined)
-    setFiles([]); setReports([]); selectFile(''); setAllDrafts({}); setBusy(false); setScanning(false); setProgress(0)
+    setFiles([]); setReports([]); setRealReports([]); selectFile(''); setAllDrafts({}); setBusy(false); setScanning(false); setProgress(0)
     toast.success('Session cleared. No source files were changed.')
   }
   function run(policy: string, removed: string[], edits: Record<string, string> = {}, batch = false) {
@@ -479,12 +481,18 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
   const currentFilePresentation = presentationFiles.find(file => file.id === selectedId)
   const currentRiskAssessment = selected?.demo && currentReport ? mapDemoRisk({ risk: currentReport.risk, partial: currentReport.partial }) : mapRealRisk(inspection && inspection.fileId === selectedId && 'result' in inspection ? inspection.result : undefined)
   const currentProgress = selected?.demo ? mapDemoProgress(busy ? 'processing' : scanning ? 'inspecting' : 'idle', progress) : mapRealProgress(removal?.status === 'processing' ? 'processing' : inspection?.status === 'inspecting' ? 'inspecting' : 'idle')
-  const currentRemovalPresentation = removal && 'plan' in removal && removal.plan ? mapRealRemoval(removal.plan, removal.selectedTargetIds || [], removal.status === 'success' ? removal.result : undefined) : undefined
+  const failedPlan = removal && 'plan' in removal ? removal.plan : undefined
+  const removalProjection = removal?.status === 'failed' && failedPlan ? { status: 'failed' as const, outputVerification: 'not-run' as const, removedTargetIds: [], preservedTargetIds: failedPlan.preservedTargetIds, warnings: [removal.error.message] } : removal?.status === 'cancelled' && failedPlan ? { status: 'failed' as const, outputVerification: 'not-run' as const, removedTargetIds: [], preservedTargetIds: failedPlan.preservedTargetIds, warnings: [removal.error.message] } : removal?.status === 'success' ? removal.result : undefined
+  const currentRemovalPresentation = removal && 'plan' in removal && removal.plan ? mapRealRemoval(removal.plan, removal.selectedTargetIds || [], removalProjection) : undefined
   const currentVerification = selected?.demo ? mapDemoVerification(Boolean(currentReport?.partial)) : removal?.status === 'success' ? mapRealVerification(removal.result.verification, { sourceFingerprint: removal.plan.sourceFingerprint, identity: removal.plan.identity }) : mapRealVerification()
   const realInspection = inspection && inspection.fileId === selectedId && 'result' in inspection ? inspection.result : undefined
   const realFindings = realInspection ? mapRealInspection(realInspection).findings : []
-  const currentReportPresentation = selected?.demo && currentReport ? mapDemoReport(currentReport) : selected && !selected.demo && realInspection ? mapRealReport({ filename: selected.name, format: selected.format, size: localFiles.current.get(selected.id)?.size }, realFindings, currentRemovalPresentation, currentVerification) : undefined
-  return <Prototype.Provider value={{ files, selected, previewUrl, previewError, setPreviewError, selectFile, addFiles, loadDemo, reports, currentReport, presentationFiles, currentFilePresentation, currentRiskAssessment, currentProgress, currentRemovalPresentation, currentVerification, currentReportPresentation, progress, busy, scanning, scenario, setScenario, run, clearSession, inspection, retryInspection, cancelInspection, removal, planRealRemoval, setRemovalTargets, approveAndProcessRemoval, downloadVerifiedRemoval,
+  const currentReportPresentation = selected?.demo && currentReport ? mapDemoReport(currentReport) : selected && !selected.demo && realInspection ? mapRealReport({ id: selected.id, filename: selected.name, format: selected.format, size: localFiles.current.get(selected.id)?.size }, realFindings, currentRemovalPresentation, currentVerification) : undefined
+  useEffect(() => {
+    if (!currentReportPresentation) return
+    setRealReports(previous => upsertReportSnapshot(previous, currentReportPresentation))
+  }, [currentReportPresentation])
+  return <Prototype.Provider value={{ files, selected, previewUrl, previewError, setPreviewError, selectFile, addFiles, loadDemo, reports, currentReport, realReports, presentationFiles, currentFilePresentation, currentRiskAssessment, currentProgress, currentRemovalPresentation, currentVerification, currentReportPresentation, progress, busy, scanning, scenario, setScenario, run, clearSession, inspection, retryInspection, cancelInspection, removal, planRealRemoval, setRemovalTargets, approveAndProcessRemoval, downloadVerifiedRemoval,
     drafts: allDrafts[selectedId] || {}, setDraft: (key, value) => setAllDrafts(old => ({ ...old, [selectedId]: { ...old[selectedId], [key]: value } })),
     removeFile: id => { if (running.current) return; if (selectedId === id) inspectionAbort.current?.abort(); removalAbort.current?.abort(); artifactOwnership.current.remove(id); releaseLocalInput(localInputs.current.get(id)); localInputs.current.delete(id); localFiles.current.delete(id); if (inspection?.fileId === id) setInspection(undefined); if (removal?.fileId === id) setRemoval(undefined); setFiles(old => old.filter(f => f.id !== id)); if (selectedId === id) selectFile(files.find(f => f.id !== id)?.id || '') },
     retryFile: id => { setScenario('normal'); setFiles(old => old.map(f => f.id === id ? { ...f, state: 'ready' } : f)); toast.info('Demo reset. You can run the workflow again.') },

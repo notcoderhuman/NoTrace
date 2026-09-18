@@ -24,7 +24,7 @@ assert.equal(mapRealProgress('processing').percentage, undefined)
 assert.equal(mapRealVerification().provenance, 'real')
 const demoReport: ReportViewModel = mapDemoReport({ id: 'demo-report', fileId: sampleFile.id, filename: sampleFile.name, format: sampleFile.format, kind: sampleFile.kind, createdAt: 'now', policy: 'quick', removed: 0, edited: 0, preserved: 1, risk: 82, changes: [], partial: false }, mapDemoFindings(metadata.slice(0, 1)))
 assert.equal(demoReport.provenance, 'demo')
-const realReport = { provenance: 'real' as const, source: { filename: sampleFile.name }, findingsBefore: [], requestedActions: [], actionsPerformed: [], verification: mapRealVerification(), preservedItems: [], removedItems: [], limitations: [], sessionOnly: true }
+const realReport = { id: 'real-report', provenance: 'real' as const, source: { filename: sampleFile.name }, findingsBefore: [], requestedActions: [], actionsPerformed: [], verification: mapRealVerification(), preservedItems: [], removedItems: [], limitations: [], sessionOnly: true }
 assert.equal(realReport.provenance, 'real')
 assert.notEqual(realReport.provenance, demoReport.provenance)
 assert.equal(demoReport.findingsBefore.every(finding => finding.source === 'demo'), true)

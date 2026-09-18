@@ -3,6 +3,7 @@ import { metadata, sampleFile, type DemoReport } from '../notrace-demo'
 import { mapDemoFile, mapDemoFindings, mapDemoMetadata, mapDemoProgress, mapDemoReport, mapDemoRisk, mapDemoVerification } from './demo-mapper'
 import { mapRealFile, mapRealInspection, mapRealProgress, mapRealRemoval, mapRealReport, mapRealRisk, mapRealVerification } from './real-mapper'
 import { deriveReportCounts } from './models'
+import { snapshotReport, upsertReportSnapshot } from './report-history'
 import { classifyRisk, scoreRisk } from './risk-scoring'
 
 const demoFile = mapDemoFile(sampleFile)
@@ -47,12 +48,19 @@ assert.equal(removal.state, 'ready-empty')
 assert.notEqual(removal.state, 'verified')
 const report: DemoReport = { id: 'r', fileId: sampleFile.id, filename: sampleFile.name, format: sampleFile.format, kind: sampleFile.kind, createdAt: 'now', policy: 'quick', removed: 0, edited: 0, preserved: 1, risk: 82, changes: [{ label: 'One', before: 'a', after: 'b', action: 'Preserved' }], partial: false }
 const demoReport = mapDemoReport(report, mapDemoFindings(metadata.slice(0, 1)))
-const realReport = mapRealReport({ filename: 'same.jpg' }, realInspection.findings, removal, mapRealVerification())
-const inspectedOnlyReport = mapRealReport({ filename: 'same.jpg' }, realInspection.findings, undefined, mapRealVerification())
+const realReport = mapRealReport({ id: 'real-report-a', filename: 'same.jpg' }, realInspection.findings, removal, mapRealVerification())
+const inspectedOnlyReport = mapRealReport({ id: 'real-report-b', filename: 'same.jpg' }, realInspection.findings, undefined, mapRealVerification())
 assert.equal(inspectedOnlyReport.provenance, 'real')
 assert.deepEqual(inspectedOnlyReport.requestedActions, [])
 assert.equal(demoReport.provenance, 'demo')
 assert.equal(realReport.provenance, 'real')
+assert.equal(realReport.id, 'real-report-a')
+assert.notEqual(realReport.id, inspectedOnlyReport.id)
+assert.equal(Object.values(realReport).some(value => value instanceof ArrayBuffer || value instanceof Blob || value instanceof Uint8Array), false)
+assert.equal(JSON.stringify(realReport).includes('artifact'), false)
+const history = upsertReportSnapshot([], realReport)
+assert.notEqual(history[0], realReport)
+assert.equal(snapshotReport(realReport).source.filename, realReport.source.filename)
 assert.equal(deriveReportCounts(demoReport).found, 1)
 assert.equal(deriveReportCounts(realReport).found, 1)
 assert.equal(realReport.findingsBefore.some(item => item.source === 'demo'), false)

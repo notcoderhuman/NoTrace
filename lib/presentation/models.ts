@@ -118,6 +118,7 @@ export type VerificationViewModel = Readonly<{
 }>
 
 export type ReportViewModel = Readonly<{
+  id: string
   provenance: PresentationSource
   source: Readonly<{ filename: string; format?: string; size?: number }>
   findingsBefore: readonly PrivacyFindingViewModel[]
