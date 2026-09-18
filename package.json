@@ -7,7 +7,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "test": "pnpm test:presentation && pnpm test:limits && pnpm test:phase1 && pnpm test:architecture && pnpm test:resolver && pnpm test:phase3a && pnpm test:jpeg-structure && pnpm test:jpeg-verifier-scanner && pnpm test:removal-plan && pnpm test:processing-boundary && pnpm test:artifact && pnpm test:ownership && pnpm test:provider-lifecycle",
+    "test": "pnpm test:presentation && pnpm test:limits && pnpm test:phase1 && pnpm test:architecture && pnpm test:resolver && pnpm test:phase3a && pnpm test:jpeg-structure && pnpm test:jpeg-verifier-scanner && pnpm test:removal-plan && pnpm test:processing-boundary && pnpm test:artifact && pnpm test:ownership && pnpm test:provider-lifecycle && pnpm test:contracts",
     "test:presentation": "echo [Presentation contracts] && tsx lib/presentation/presentation.test.ts && tsx lib/presentation/integration.test.ts",
     "test:limits": "echo [Limit capability contract] && tsx lib/processing-core/domain/limits.test.ts",
     "test:phase1": "echo [Phase 1/2 contract] && tsx lib/processing-core/phase1-contract.test.ts",
@@ -21,6 +21,7 @@
     "test:artifact": "echo [Artifact lifecycle] && tsx lib/processing-core/domain/artifact.test.ts",
     "test:ownership": "echo [Ownership FSM] && tsx lib/processing-core/domain/ownership.test.ts",
     "test:provider-lifecycle": "echo [Provider artifact lifecycle] && tsx components/notrace/provider-lifecycle.test.ts",
+    "test:contracts": "echo [Core contracts] && tsx lib/processing-core/domain/contracts.test.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {
