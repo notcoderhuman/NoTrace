@@ -130,14 +130,23 @@ export type ArtifactOwnershipController = Readonly<{
   get(fileId: string): OutputArtifact | undefined
   has(fileId: string): boolean
   size(): number
+  acquireDownloadLease(fileId: string, artifact: OutputArtifact): BoundaryResult<void>
+  releaseDownloadLease(fileId: string, artifact: OutputArtifact): BoundaryResult<void>
 }>
 
 export function createArtifactOwnershipController(artifacts = new Map<string, OutputArtifact>()): ArtifactOwnershipController {
   const owners = new Map<OutputArtifact, string>()
   const entries = new Map<string, { artifact: OutputArtifact; state: 'PROVIDER_OWNED'; identity?: ProcessingResult['identity'] }>()
   const disposed = new Set<OutputArtifact>()
+  const downloadLeases = new Map<OutputArtifact, number>()
+  const pendingDisposals = new Set<OutputArtifact>()
   for (const [fileId, artifact] of artifacts) { if (owners.has(artifact)) { artifacts.delete(fileId); continue } owners.set(artifact, fileId); entries.set(fileId, { artifact, state: 'PROVIDER_OWNED' }) }
-  const disposeOwned = (artifact: OutputArtifact | undefined) => { if (!artifact || disposed.has(artifact)) return; disposed.add(artifact); disposeArtifact(artifact) }
+  const disposeOwned = (artifact: OutputArtifact | undefined) => {
+    if (!artifact || disposed.has(artifact)) return
+    if ((downloadLeases.get(artifact) || 0) > 0) { pendingDisposals.add(artifact); return }
+    disposed.add(artifact)
+    disposeArtifact(artifact)
+  }
   return {
     adopt(fileId, artifact, state = 'EXECUTION_OWNED', identity) {
       if (state !== 'EXECUTION_OWNED' || !identity || disposed.has(artifact)) return { ok: false, error: { code: 'INVALID_INPUT', message: 'Only a live execution-owned artifact may be adopted.' } }
@@ -160,7 +169,7 @@ export function createArtifactOwnershipController(artifacts = new Map<string, Ou
     clear() { for (const entry of entries.values()) { owners.delete(entry.artifact); disposeOwned(entry.artifact) } entries.clear(); artifacts.clear(); owners.clear() },
     get(fileId) { return artifacts.get(fileId) },
     has(fileId) { return artifacts.has(fileId) },
-    size() { return artifacts.size },
+    size() { return artifacts.size }, acquireDownloadLease(fileId, artifact) { if (disposed.has(artifact) || artifacts.get(fileId) !== artifact || entries.get(fileId)?.artifact !== artifact) return { ok: false, error: { code: 'INVALID_INPUT', message: 'A currently provider-owned verified artifact is required.' } }; downloadLeases.set(artifact, (downloadLeases.get(artifact) || 0) + 1); return { ok: true, value: undefined } }, releaseDownloadLease(fileId, artifact) { const count = downloadLeases.get(artifact) || 0; if ((artifacts.get(fileId) !== artifact && !pendingDisposals.has(artifact)) || count <= 0) return { ok: false, error: { code: 'INVALID_INPUT', message: 'The download lease is not active.' } }; if (count === 1) downloadLeases.delete(artifact); else downloadLeases.set(artifact, count - 1); if (!downloadLeases.has(artifact) && pendingDisposals.has(artifact)) { pendingDisposals.delete(artifact); disposed.add(artifact); disposeArtifact(artifact) }; return { ok: true, value: undefined } },
   }
 }
 
@@ -334,9 +343,14 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     if (!current || current.fileId !== fileId || current.status !== 'success' || current.result.outputVerification !== 'passed' || !current.result.output?.created) return { ok: false, error: { code: 'INVALID_INPUT', message: 'No verified output is available.' } }
     const artifact = verifiedArtifacts.current.get(fileId)
     if (!artifact) return { ok: false, error: { code: 'INVALID_INPUT', message: 'No verified output is available.' } }
-    const bytes = await artifact.read()
-    if (!bytes.ok) return { ok: false, error: { code: bytes.error.code, message: 'The verified output could not be read.' } }
+    const lease = artifactOwnership.current.acquireDownloadLease(fileId, artifact)
+    if (!lease.ok) return lease
+    let leaseReleased = false
+    const releaseLease = () => { if (!leaseReleased) { leaseReleased = true; artifactOwnership.current.releaseDownloadLease(fileId, artifact) } }
     let url: string | undefined
+    let bytes: BoundaryResult<Uint8Array>
+    try { bytes = await artifact.read() } catch { releaseLease(); return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'The verified output could not be read.' } } }
+    if (!bytes.ok) { releaseLease(); return { ok: false, error: { code: bytes.error.code, message: 'The verified output could not be read.' } } }
     let anchor: HTMLAnchorElement | undefined
     try {
       const blob = new Blob([bytes.value], { type: artifact.mediaType || 'image/jpeg' })
@@ -352,6 +366,7 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
       return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'The local download could not be completed.' } }
     } finally {
       if (url) URL.revokeObjectURL(url)
+      releaseLease()
     }
   }
   function scan() {

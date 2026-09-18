@@ -110,6 +110,22 @@ async function main() {
     const owned = new Map<string, OutputArtifact>(); const a = artifact('transferred'); owned.set('file', a)
     assert.equal(a.disposeCount, 0); assert.equal(owned.get('file'), a); disposeOwnedArtifacts(owned); assert.equal(a.disposeCount, 1)
   })
-  console.log('Provider artifact lifecycle tests passed: 6')
+  await test('download lease defers cleanup until slow read completes', async () => {
+    const owned = new Map<string, OutputArtifact>(); const controller = createArtifactOwnershipController(owned); const a = artifact('leased'); controller.adopt('file', a, 'EXECUTION_OWNED', JPEG_PROCESSING_IDENTITY)
+    assert.equal(controller.acquireDownloadLease('file', a).ok, true); controller.remove('file'); assert.equal(controller.get('file'), undefined); assert.equal(a.disposeCount, 0); assert.equal((await a.read()).ok, true); assert.equal(controller.releaseDownloadLease('file', a).ok, true); assert.equal(a.disposeCount, 1); assert.equal(controller.releaseDownloadLease('file', a).ok, false)
+  })
+  await test('failed read releases lease without retaining ownership', () => {
+    const owned = new Map<string, OutputArtifact>(); const controller = createArtifactOwnershipController(owned); const a = artifact('failed-read'); controller.adopt('file', a, 'EXECUTION_OWNED', JPEG_PROCESSING_IDENTITY)
+    assert.equal(controller.acquireDownloadLease('file', a).ok, true); controller.remove('file'); assert.equal(a.disposeCount, 0); assert.equal(controller.releaseDownloadLease('file', a).ok, true); assert.equal(a.disposeCount, 1); assert.equal(controller.acquireDownloadLease('file', a).ok, false)
+  })
+  await test('concurrent download leases defer disposal until the final release', () => {
+    const owned = new Map<string, OutputArtifact>(); const controller = createArtifactOwnershipController(owned); const a = artifact('concurrent'); controller.adopt('file', a, 'EXECUTION_OWNED', JPEG_PROCESSING_IDENTITY)
+    assert.equal(controller.acquireDownloadLease('file', a).ok, true); assert.equal(controller.acquireDownloadLease('file', a).ok, true); controller.clear(); assert.equal(a.disposeCount, 0); assert.equal(controller.releaseDownloadLease('file', a).ok, true); assert.equal(a.disposeCount, 0); assert.equal(controller.releaseDownloadLease('file', a).ok, true); assert.equal(a.disposeCount, 1)
+  })
+  await test('ownership denial does not acquire a download lease', () => {
+    const owned = new Map<string, OutputArtifact>(); const controller = createArtifactOwnershipController(owned); const a = artifact('revoked'); controller.adopt('file', a, 'EXECUTION_OWNED', JPEG_PROCESSING_IDENTITY); controller.remove('file')
+    assert.equal(controller.acquireDownloadLease('file', a).ok, false); assert.equal(a.disposeCount, 1)
+  })
+  console.log('Provider artifact lifecycle tests passed: 10')
 }
 void main()
