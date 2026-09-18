@@ -78,11 +78,10 @@ export function MotionReveal({ children, className, motionKey }: { children: Rea
   useEffect(() => {
     const mm = gsap.matchMedia()
     mm.add('(prefers-reduced-motion: no-preference)', () => {
-      if (ref.current) {
-        const raw = getComputedStyle(document.documentElement).getPropertyValue('--notrace-motion-spatial').trim()
-        const duration = raw.endsWith('ms') ? Number.parseFloat(raw) / 1000 : 0.44
-        gsap.fromTo(ref.current, { opacity: 0, y: 12 }, { opacity: 1, y: 0, duration, ease: 'power3.out' })
-      }
+      if (!ref.current) return
+      const raw = getComputedStyle(document.documentElement).getPropertyValue('--notrace-motion-spatial').trim()
+      const duration = raw.endsWith('ms') ? Number.parseFloat(raw) / 1000 : 0.44
+      gsap.fromTo(ref.current, { opacity: 0, y: 8 }, { opacity: 1, y: 0, duration, ease: 'power3.out', clearProps: 'transform,opacity' })
     })
     return () => mm.revert()
   }, [motionKey])
