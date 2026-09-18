@@ -21,7 +21,7 @@ const headings: Record<Section, { title: string; subtitle: string }> = {
   remove: { title: 'Keep the moment. Lose the traces.', subtitle: 'Choose a cleanup policy. Preview the changes. Stay in control.' },
   edit: { title: 'The details are yours to decide.', subtitle: 'Edit what you control. Preserve what your file needs.' },
   'ai-watermark': { title: 'AI Watermark & Provenance', subtitle: 'Two different signals. One transparent view of your media.' },
-  reports: { title: 'Every change, accounted for.', subtitle: 'A clear record of your simulated processing and verification.' },
+  reports: { title: 'Every change, accounted for.', subtitle: 'A clear record of local processing, simulated scenarios, and verification.' },
 }
 export function Workspace({ section }: { section: Section }) {
   const { selected, loadDemo, scanning, busy, progress, retryFile } = usePrototype()
