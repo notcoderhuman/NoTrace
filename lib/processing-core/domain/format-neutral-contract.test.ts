@@ -11,7 +11,7 @@ const pngTarget: RemovalTarget = { id: 'png-text-0', formatId: 'png', typeId: 't
 const pngEvidence: EvidenceRecord = { id: 'png-text-0', label: 'PNG text chunk', category: 'text', state: 'detected', safety: 'safe-to-remove', targetId: pngTarget.id, explanation: 'Repeated PNG text chunk.', source: 'simulated-fixture', confidence: 'high' }
 assert.equal(isStaticCapabilityDeclaration(pngDeclaration), true)
 assert.equal(isEvidenceRecord(pngEvidence), true)
-assert.equal(canAuthorizeRemoval(pngTarget, phaseOneSafetyPolicy), false)
+assert.equal(canAuthorizeRemoval(pngTarget, phaseOneSafetyPolicy), true)
 assert.equal(isEvidenceRecord({ ...pngEvidence, state: 'unknown' }), false)
 assert.equal(isEvidenceRecord({ ...pngEvidence, parserPrivate: true } as unknown), false)
 const jpegTarget: RemovalTarget = { ...pngTarget, id: 'jpeg-comment-0', formatId: 'jpeg', typeId: 'jpeg-marker-fe', scope: { formatId: 'jpeg', scopeId: 'jpeg-com' } }

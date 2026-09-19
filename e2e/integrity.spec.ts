@@ -64,7 +64,7 @@ test.describe('NoTrace browser integrity and privacy guards', () => {
   test('reselects the same logical file through the reset native input', async ({ page }) => {
     await page.goto('/inspect')
     await admit(page, 'same-file.jpg')
-    const picker = page.locator('input[aria-label="Add local JPEG files"]')
+    const picker = page.locator('input[aria-label="Add local JPEG or PNG files"]')
     await picker.setInputFiles({ name: 'same-file.jpg', mimeType: 'image/jpeg', buffer: fixtureBytes })
     await expect(page.getByRole('button', { name: 'Select same-file.jpg' })).toHaveCount(2, { timeout: 10_000 })
     await expect(page.getByRole('img', { name: /privacy risk \d+ out of 100/i })).toBeVisible()
@@ -74,7 +74,7 @@ test.describe('NoTrace browser integrity and privacy guards', () => {
     await page.goto('/inspect')
     await admit(page, 'file-a.jpg')
     await page.getByRole('button', { name: 'Add more files' }).click()
-    const picker = page.locator('input[aria-label="Add local JPEG files"]')
+    const picker = page.locator('input[aria-label="Add local JPEG or PNG files"]')
     await picker.setInputFiles({ name: 'file-b.jpg', mimeType: 'image/jpeg', buffer: fixtureBytes })
     await expect(page.getByRole('button', { name: 'Select file-b.jpg' })).toBeVisible({ timeout: 10_000 })
     await expect(page.getByRole('button', { name: 'Select file-b.jpg' })).toHaveAttribute('aria-pressed', 'true')
@@ -86,7 +86,7 @@ test.describe('NoTrace browser integrity and privacy guards', () => {
   test('exposes a retryable failed state for malformed JPEG bytes', async ({ page }) => {
     await page.goto('/inspect')
     const malformed = new Uint8Array([0xff, 0xd8, 0xff, 0xe1, 0, 20, 0x45])
-    await page.locator('input[aria-label="Choose local JPEG files"]').setInputFiles({ name: 'malformed.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(malformed) })
+    await page.locator('input[aria-label="Choose local JPEG or PNG files"]').setInputFiles({ name: 'malformed.jpg', mimeType: 'image/jpeg', buffer: Buffer.from(malformed) })
     await expect(page.getByRole('button', { name: 'Select malformed.jpg' })).toBeVisible({ timeout: 10_000 })
     await expect(page.getByText(/inspection could not be completed/i)).toBeVisible({ timeout: 15_000 })
     await expect(page.getByRole('button', { name: 'Retry inspection' })).toBeVisible()

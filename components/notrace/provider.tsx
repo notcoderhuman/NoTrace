@@ -354,7 +354,8 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     if (!bytes.ok) { releaseLease(); return { ok: false, error: { code: bytes.error.code, message: 'The verified output could not be read.' } } }
     let anchor: HTMLAnchorElement | undefined
     try {
-      const blob = new Blob([bytes.value], { type: artifact.mediaType || 'image/jpeg' })
+      if (!artifact.mediaType) return { ok: false, error: { code: 'VERIFICATION_FAILED', message: 'Verified artifact media type is missing.' } }
+      const blob = new Blob([bytes.value], { type: artifact.mediaType })
       url = URL.createObjectURL(blob)
       anchor = document.createElement('a')
       anchor.href = url
@@ -403,7 +404,7 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     })
     if (!additions.length) return
     const rejected = Array.from(incoming).slice(0, 30).filter(file => !['jpg', 'jpeg', 'png'].includes(file.name.split('.').pop()?.toLowerCase() || '') || file.size > DEFAULT_BROWSER_INPUT_MAX_BYTES)
-    if (rejected.length) toast.error(`${rejected.length} file${rejected.length === 1 ? '' : 's'} rejected. Only JPEG/JPG files up to 32 MB are supported.`)
+    if (rejected.length) toast.error(`${rejected.length} file${rejected.length === 1 ? '' : 's'} rejected. Only supported JPEG or PNG files up to 32 MB are accepted.`)
     setFiles(old => {
       const next = [...old, ...additions].slice(-30)
       const retained = new Set(next.map(file => file.id))

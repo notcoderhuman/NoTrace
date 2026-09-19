@@ -35,7 +35,7 @@ export const structuralLimits = Object.freeze({
 export const phaseOneSafetyPolicy: SafetyPolicy = Object.freeze({
   ...structuralLimits,
   allowedOperations: Object.freeze(['inspect', 'remove', 'edit', 'verify'] as Operation[]),
-  allowedRemovalScopes: Object.freeze([{ formatId: 'jpeg', scopeId: 'jpeg-com' }] as RemovalScope[]),
+  allowedRemovalScopes: Object.freeze([{ formatId: 'jpeg', scopeId: 'jpeg-com' }, { formatId: 'png', scopeId: 'png-text' }] as RemovalScope[]),
   allowOutput: true,
   preserveOriginal: true,
   failClosed: true,

@@ -14,9 +14,9 @@ const features = [
   { icon: FileCheck2, title: 'Reports', label: 'Review session evidence', text: 'Return to inspection and verification records.', href: '/reports', state: 'Session only' },
 ]
 const faqs = [
-  ['Does my media leave my device?', 'No. Real JPEG inspection and cleanup run locally in your browser; files are not uploaded. Demo mode uses clearly labelled illustrative data.'],
+  ['Does my media leave my device?', 'No. Real JPEG and PNG inspection and supported cleanup run locally in your browser; files are not uploaded. Demo mode uses clearly labelled illustrative data.'],
   ['Will NoTrace change my original files?', 'No. Real cleanup produces a separate verified result. Your original file remains untouched. Demo mode uses illustrative data and does not process media.'],
-  ['What can NoTrace inspect today?', 'The current local workflow accepts JPEG / JPG files for inspection and supported JPEG comment removal. Other formats remain clearly unsupported or illustrative.'],
+  ['What can NoTrace inspect today?', 'The current local workflow accepts JPEG / JPG and PNG files for inspection. Supported JPEG comments and explicitly approved PNG text chunks can be removed; other structures remain preserved or unsupported.'],
   ['Are content credentials and invisible watermarks the same?', 'No. C2PA / Content Credentials describe cryptographically signed provenance. Invisible watermarks are signals embedded in media. NoTrace shows these technologies separately, with simulated detection and support states.'],
   ['What can I download?', 'Only a locally verified output can be downloaded from the real workflow. Reports are session-only presentation data.'],
 ]

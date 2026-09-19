@@ -33,6 +33,7 @@ export type RemovalTarget = Readonly<{
 export type RemovalWitness = Readonly<{
   sourceFingerprint: string
   targetId: string
+  typeId?: string
   ordinal: number
   startOffset: number
   endOffset: number

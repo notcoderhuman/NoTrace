@@ -10,7 +10,7 @@ export type RemovalTargetViewModel = Readonly<{
 }>
 
 const labels: Record<RemovalTargetCategory, string> = {
-  comment: 'JPEG comment',
+  comment: 'Supported text/comment chunk',
   exif: 'EXIF metadata',
   xmp: 'XMP metadata',
   icc: 'ICC color profile',

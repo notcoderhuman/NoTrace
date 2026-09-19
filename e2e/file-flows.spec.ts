@@ -16,7 +16,7 @@ test.describe('NoTrace local file flows', () => {
     await page.goto('/inspect')
     await expect(page.getByRole('heading', { name: /Under the surface/i })).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Browse Files' })).toBeVisible()
-    await expect(page.getByText('JPEG / JPG inspection')).toBeVisible()
+    await expect(page.getByText('JPEG / JPG / PNG inspection')).toBeVisible()
 
     const chooser = page.waitForEvent('filechooser')
     await page.getByRole('button', { name: 'Browse Files' }).click()
