@@ -15,6 +15,8 @@ export * from './classification/safety-policy'
 export * from './adapters/registry'
 export * from './adapters/contracts'
 export * from './adapters/jpeg'
+export * from './adapters/png'
+export * from './adapters/png-verifier'
 // The canonical independent verifier must be reachable from the public surface. The transformer
 // barrel above deliberately no longer exports the non-independent `verifyJpegOutput`, which was
 // removed in the same change.

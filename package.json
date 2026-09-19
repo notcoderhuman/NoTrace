@@ -25,7 +25,7 @@
     "test:provider-lifecycle": "echo [Provider artifact lifecycle] && tsx components/notrace/provider-lifecycle.test.ts",
     "test:provider-settlement": "echo [Provider settlement] && tsx components/notrace/provider-settlement.test.ts",
     "test:provider-settlement-guards": "echo [Provider settlement guards] && tsx components/notrace/provider-settlement-guards.test.ts",
-    "test:contracts": "echo [Core contracts] && tsx lib/processing-core/domain/contracts.test.ts && tsx lib/processing-core/adapters/jpeg-contract.test.ts && tsx lib/processing-core/domain/format-neutral-contract.test.ts",
+    "test:contracts": "echo [Core contracts] && tsx lib/processing-core/domain/contracts.test.ts && tsx lib/processing-core/adapters/jpeg-contract.test.ts && tsx lib/processing-core/domain/format-neutral-contract.test.ts && tsx lib/processing-core/adapters/png.test.ts",
     "test:e2e": "playwright test"
   },
   "dependencies": {

@@ -297,12 +297,12 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     removalAbort.current = controller
     setRemoval({ fileId, status: 'planning' })
     void (async () => {
-      let result = await planningBoundary.current!.planRemoval({ input, fieldIds: [], policy: 'jpeg-com' }, { signal: controller.signal })
+      let result = await planningBoundary.current!.planRemoval({ input, fieldIds: [], policy: input.descriptor.mimeType === 'image/png' ? 'png-text' : 'jpeg-com' }, { signal: controller.signal })
       if (result.ok && result.value.removableTargetIds.length === 0) {
         const targetIds = result.value.targets
-          .filter(target => target.category === 'comment' && target.removable && target.classification === 'SAFE_TO_REMOVE')
+          .filter(target => target.removable && target.classification === 'SAFE_TO_REMOVE')
           .map(target => target.id)
-        if (targetIds.length) result = await planningBoundary.current!.planRemoval({ input, fieldIds: targetIds, policy: 'jpeg-com' }, { signal: controller.signal })
+        if (targetIds.length) result = await planningBoundary.current!.planRemoval({ input, fieldIds: targetIds, policy: input.descriptor.mimeType === 'image/png' ? 'png-text' : 'jpeg-com' }, { signal: controller.signal })
       }
       if (!removalLifecycle.current.isCurrent(operation, fileId, input.descriptor.id) || controller.signal.aborted || requestId !== removalRequest.current || selectedId !== fileId || localInputs.current.get(fileId) !== input) return
       if (result.ok) setRemoval({ fileId, status: result.value.status === 'ready' ? (result.value.removableTargetIds.length ? 'ready' : 'ready-empty') : 'idle', plan: result.value, selectedTargetIds: [] } as RemovalState)
@@ -395,14 +395,14 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     if (!incomingFiles.length) return
     const additions: DemoFile[] = incomingFiles.slice(0, 30).map(file => {
       const ext = file.name.split('.').pop()?.toLowerCase() || ''
-      const supported = ['jpg', 'jpeg'].includes(ext) && file.size <= DEFAULT_BROWSER_INPUT_MAX_BYTES
+      const supported = ['jpg', 'jpeg', 'png'].includes(ext) && file.size <= DEFAULT_BROWSER_INPUT_MAX_BYTES
       const id = crypto.randomUUID()
       localInputs.current.set(id, createBrowserFileInput(file))
       localFiles.current.set(id, file)
       return { id, name: file.name, format: ext.toUpperCase() || 'Unknown', size: file.size > 1048576 ? `${(file.size / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(file.size / 1024))} KB`, kind: 'image', state: supported ? 'ready' : 'unsupported', demo: false }
     })
     if (!additions.length) return
-    const rejected = Array.from(incoming).slice(0, 30).filter(file => !['jpg', 'jpeg'].includes(file.name.split('.').pop()?.toLowerCase() || '') || file.size > DEFAULT_BROWSER_INPUT_MAX_BYTES)
+    const rejected = Array.from(incoming).slice(0, 30).filter(file => !['jpg', 'jpeg', 'png'].includes(file.name.split('.').pop()?.toLowerCase() || '') || file.size > DEFAULT_BROWSER_INPUT_MAX_BYTES)
     if (rejected.length) toast.error(`${rejected.length} file${rejected.length === 1 ? '' : 's'} rejected. Only JPEG/JPG files up to 32 MB are supported.`)
     setFiles(old => {
       const next = [...old, ...additions].slice(-30)

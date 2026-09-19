@@ -43,15 +43,12 @@ async function main() {
     if (result.ok) { assert.equal(result.value.analyzed, true); assert.equal(result.value.format.state, 'supported'); assert.equal(result.value.fields[0]?.category, 'EXIF') }
   })
 
-  await test('PNG remains unsupported and never resolves JPEG inspection', async () => {
+  await test('PNG resolves the production PNG inspection path', async () => {
     const boundary = createInspectionBoundary(createDefaultFormatAdapterRegistry())
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
     const result = await boundary.inspect(createMemoryFileInput(png, { id: 'png', filename: 'image.png', mimeType: 'image/png' }))
     assert.equal(result.ok, false)
-    if (!result.ok) assert.equal(result.error.code, 'UNSUPPORTED')
-    const removal = await boundary.execute({ operation: 'remove', input: createMemoryFileInput(png, { id: 'png-remove', filename: 'image.png', mimeType: 'image/png' }) })
-    assert.equal(removal.ok, false)
-    if (!removal.ok) assert.equal(removal.error.code, 'UNSUPPORTED')
+    if (!result.ok) assert.notEqual(result.error.code, 'UNSUPPORTED')
   })
 
   await test('fake JPEG extension and MIME do not bypass byte validation', async () => {
