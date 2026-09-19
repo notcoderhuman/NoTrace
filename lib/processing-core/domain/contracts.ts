@@ -108,6 +108,7 @@ export function isEvidenceRecord(value: unknown): value is EvidenceRecord {
 /** A single shared adapter conformance shape for future format implementations. */
 export type AdapterContract = Readonly<{
   conformance: AdapterConformance
+  evidence?: (result: InspectionResult) => readonly EvidenceRecord[]
   inspect?: (context: ContractOperationContext) => Promise<BoundaryResult<InspectionResult>>
   planRemoval?: (context: ContractOperationContext, targetIds: readonly string[]) => Promise<BoundaryResult<RemovalPlan>>
   executeRemoval?: (context: ContractOperationContext, plan: RemovalPlan, approval: RemovalApproval) => Promise<BoundaryResult<ProcessingResult>>

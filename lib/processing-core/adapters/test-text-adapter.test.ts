@@ -2,6 +2,7 @@ import { strict as assert } from 'node:assert'
 import { createMemoryArtifact } from '../domain/artifact'
 import { createMemoryInput } from '../domain/input'
 import type { ProcessingIdentity } from '../domain/identity'
+import type { AdapterContract, AdapterConformance, EvidenceRecord, StaticCapabilityDeclaration, ResourceContract } from '../domain/contracts'
 import type { RemovalApproval, RemovalPlan, RemovalTarget } from '../domain/operation'
 import type { BoundaryResult, VerificationResult } from '../domain/result'
 import { createFormatAdapterRegistry, type FormatAdapter } from './registry'
@@ -23,7 +24,7 @@ function isFixture(bytes: Uint8Array): boolean { return bytes.length >= PREFIX.l
 function target(bytes: Uint8Array): RemovalTarget {
   const startOffset = PREFIX.length
   const endOffset = bytes.length
-  return { id: 'test-text-marker-0', kind: 'format-target', marker: 0, ordinal: 0, startOffset, endOffset, category: 'comment', classification: 'SAFE_TO_REMOVE', removable: true, reason: 'Explicit test marker.' }
+  return { id: 'test-text-marker-0', kind: 'format-target', marker: 0, ordinal: 0, startOffset, endOffset, category: 'comment', scope: 'test-text-marker', classification: 'SAFE_TO_REMOVE', removable: true, reason: 'Explicit test marker.' }
 }
 
 export function createTestTextFixture(content = `keep ${MARKER} protected`): Uint8Array { return concat(PREFIX, encode(content)) }
@@ -31,10 +32,18 @@ export function createTestTextFixture(content = `keep ${MARKER} protected`): Uin
 export function createTestTextAdapters(): { transformer: FormatAdapter; verifier: FormatAdapter } {
   const capability = { extensions: ['ntxt'], mimeTypes: [MEDIA], operations: ['inspect', 'remove'] as const }
   const verifierCapability = { extensions: ['ntxt'], mimeTypes: [MEDIA], operations: ['verify'] as const }
+  const declaration: StaticCapabilityDeclaration = { formatId: FORMAT, operations: ['inspect', 'executeRemoval'], extensions: ['ntxt'], mimeTypes: [MEDIA], processingIdentity: IDENTITY, verifierCompatibilityKey: IDENTITY.verifierCompatibilityKey }
+  const verifierDeclaration: StaticCapabilityDeclaration = { formatId: FORMAT, operations: ['verifyRemoval'], extensions: ['ntxt'], mimeTypes: [MEDIA], processingIdentity: IDENTITY, verifierCompatibilityKey: IDENTITY.verifierCompatibilityKey }
+  const resource: ResourceContract = { inputBound: { maxBytes: 1024 * 1024, state: 'measured' }, fullBufferOperations: { state: 'measured' }, streaming: { supported: false, state: 'measured' }, worker: { required: false, state: 'measured' }, transfer: { transferable: false, copies: true, state: 'inferred' }, temporaryAllocations: 'inferred', concurrency: { state: 'unmeasured' }, cancellationPoints: ['input read'] }
+  const evidence = (result: any): readonly EvidenceRecord[] => result.fields.map((field: any) => ({ id: field.id, label: field.label, category: field.category, state: 'detected', safety: 'safe-to-remove', explanation: field.value ?? 'detected', source: 'simulated-fixture', confidence: 'high' }))
+  const conformance: AdapterConformance = { level: 'removal-capable', declaration, resource }
+  const verifierConformance: AdapterConformance = { level: 'verification-capable', declaration: verifierDeclaration, resource, independentVerifier: true }
   const transformer: FormatAdapter = {
     id: 'test-text-transformer', role: 'transformer', formatId: FORMAT, engineId: IDENTITY.engineId, engineVersion: IDENTITY.engineVersion, capabilityKey: IDENTITY.capabilityKey, verifierCompatibilityKey: 'test-text-v1', verificationCheckIds: CHECKS,
     probe: async () => ({ ok: true as const, value: { formatId: FORMAT, mediaType: MEDIA, confidence: 'structural' as const } }),
-    capability,
+    capability, conformance, evidence,
+    contract: { conformance, evidence, inspect: async () => ({ ok: false as const, error: { code: 'UNSUPPORTED' as const, message: 'not called' } }) } as AdapterContract,
+    inspect: async () => ({ ok: false as const, error: { code: 'UNSUPPORTED' as const, message: 'not called' } }),
     planRemoval: async (input, ids) => {
       const read = await input.read(); if (!read.ok) return read
       if (!isFixture(read.value)) return { ok: false, error: { code: 'UNSUPPORTED', message: 'Not a test-text fixture.' } }
@@ -57,7 +66,7 @@ export function createTestTextAdapters(): { transformer: FormatAdapter; verifier
     },
   }
   const verifier: FormatAdapter = {
-    id: 'test-text-verifier', role: 'verifier',
+    id: 'test-text-verifier', role: 'verifier', conformance: verifierConformance, contract: { conformance: verifierConformance } as AdapterContract,
     probe: async () => ({ ok: true as const, value: { formatId: FORMAT, mediaType: MEDIA, confidence: 'structural' as const } }), formatId: FORMAT, engineId: IDENTITY.engineId, engineVersion: IDENTITY.engineVersion, capabilityKey: 'test-text:verify', verifierCompatibilityKey: 'test-text-v1', verifierIndependence: 'structural-independent', verificationCheckIds: CHECKS, capability: verifierCapability,
     verifyOutput: async (input, output, plan, approval): Promise<BoundaryResult<VerificationResult>> => {
       const original = await input.read(); if (!original.ok) return original

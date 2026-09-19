@@ -193,7 +193,7 @@ function inspectSegments(bytes: Uint8Array, signal?: AbortSignal): BoundaryResul
     const ordinalKey = classified.category ?? classified.kind
     const ordinal = counts.get(ordinalKey) ?? 0
     counts.set(ordinalKey, ordinal + 1)
-    const target = classified.category && classified.classification ? { id: `jpeg-${classified.category === 'unknown' ? `app-${marker.toString(16)}` : classified.category}-${ordinal}`, kind: 'jpeg-segment' as const, marker, category: classified.category, classification: classified.classification, removable: classified.removable, reason: classified.reason ?? 'Preserved by structural policy.', ordinal, startOffset, endOffset: offset + length } : undefined
+    const target = classified.category && classified.classification ? { id: `jpeg-${classified.category === 'unknown' ? `app-${marker.toString(16)}` : classified.category}-${ordinal}`, kind: 'jpeg-segment' as const, marker, category: classified.category, scope: classified.category === 'comment' ? 'jpeg-com' : undefined, classification: classified.classification, removable: classified.removable, reason: classified.reason ?? 'Preserved by structural policy.', ordinal, startOffset, endOffset: offset + length } : undefined
     segments.push({ index: segments.length, kind: classified.kind, marker, startOffset, endOffset: offset + length, payloadLength, target })
     if (marker >= 0xe0 && marker <= 0xef) metadataBytes += payloadLength
     if (metadataBytes > JPEG_MAX_TOTAL_METADATA_BYTES) return { ok: false, error: { code: 'LIMIT_EXCEEDED', message: 'JPEG metadata exceeds the structural limit.' } }
@@ -351,7 +351,7 @@ export async function removeJpegCom(input: LocalInput, plan: RemovalPlan, approv
   for (const part of outputParts) { output.set(part, offset); offset += part.byteLength }
   if (signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Removal was cancelled.' } }
   if (removalTrace.length !== targets.length || removalTrace.some((trace, index) => trace.targetId !== targets[index].id)) return invalid
-  const artifact = createMemoryArtifact(output, input.descriptor.filename.replace(/\.(?:jpe?g)$/i, '') + '_notrace.jpg')
+  const artifact = createMemoryArtifact(output, input.descriptor.filename.replace(/\.(?:jpe?g)$/i, '') + '_notrace.jpg', 'image/jpeg')
   return { ok: true, value: { kind: 'processing', status: 'success', input: { filename: input.descriptor.filename, mimeType: input.descriptor.mimeType, size: input.descriptor.size }, output: { filename: artifact.filename, created: true, artifact }, outputVerification: 'not-run', removalTrace, removedTargetIds: targets.map(target => target.id), preservedTargetIds: plan.targets.filter(target => !approved.has(target.id)).map(target => target.id), warnings: ['Output created in memory. Independent verification has not been performed.'] } }
 }
 
@@ -371,6 +371,7 @@ export async function inspectJpegStructure(input: LocalInput, signal?: AbortSign
 
 export const jpegContract: AdapterContract = {
   conformance: jpegConformance,
+  evidence: jpegEvidenceFromInspection,
   inspect: async (context: ContractOperationContext) => inspectJpeg(context.input, context.signal),
   planRemoval: async (context: ContractOperationContext, targetIds) => planJpegRemoval(context.input, targetIds, 'contract', context.signal),
   executeRemoval: async (context, plan, approval) => removeJpegCom(context.input, plan, approval, context.signal),

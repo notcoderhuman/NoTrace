@@ -5,7 +5,7 @@ import type { ContentProbe } from '../domain/probe'
 import type { LocalInput } from '../domain/input'
 import type { InspectionResult } from '../domain/metadata'
 import type { ProcessingResult, RemovalPlan } from '../domain/operation'
-import type { AdapterContract, AdapterConformance, EvidenceRecord } from '../domain/contracts'
+import { isStaticCapabilityDeclaration, isEvidenceRecord, type AdapterContract, type AdapterConformance, type EvidenceRecord, type FormatOperation } from '../domain/contracts'
 
 export type AdapterCapability = Readonly<{
   extensions: readonly string[]
@@ -48,10 +48,52 @@ export interface FormatAdapterRegistry {
   list(): readonly FormatAdapter[]
 }
 
+const destructiveOperations = new Set<Operation>(['remove'])
+const contractOperationFor: Partial<Record<Operation, FormatOperation>> = { inspect: 'inspect', remove: 'executeRemoval', verify: 'verifyRemoval' }
+
+function contractDeclaration(adapter: FormatAdapter) {
+  return adapter.contract?.conformance.declaration
+}
+
+function hasValidEvidence(adapter: FormatAdapter): boolean {
+  const declaration = contractDeclaration(adapter)
+  if (!declaration || !declaration.operations.includes('inspect')) return true
+  if (typeof adapter.evidence !== 'function' && typeof adapter.contract?.evidence !== 'function') return false
+  try {
+    const records = adapter.evidence?.({ kind: 'inspection', status: 'success', input: { filename: 'contract-probe' }, format: { state: 'unknown' }, fields: [], warnings: [], analyzed: true } as InspectionResult) ?? adapter.contract?.evidence?.({ kind: 'inspection', status: 'success', input: { filename: 'contract-probe' }, format: { state: 'unknown' }, fields: [], warnings: [], analyzed: true } as InspectionResult) ?? []
+    return Array.isArray(records) && records.every(isEvidenceRecord)
+  } catch { return false }
+}
+
+function validContract(adapter: FormatAdapter): boolean {
+  const contract = adapter.contract
+  const conformance = contract?.conformance
+  const declaration = conformance?.declaration
+  if (!contract || !conformance || !isStaticCapabilityDeclaration(declaration) || !hasValidEvidence(adapter)) return false
+  if (declaration.formatId !== adapter.formatId || (declaration.verifierCompatibilityKey ?? '') !== (adapter.verifierCompatibilityKey ?? '')) return false
+  if (!declaration.extensions.every(value => adapter.capability.extensions.includes(value)) || !declaration.mimeTypes.every(value => adapter.capability.mimeTypes.includes(value))) return false
+  const exposed = adapter.capability.operations.map(operation => contractOperationFor[operation]).filter(Boolean) as FormatOperation[]
+  if (!exposed.every(operation => declaration.operations.includes(operation))) return false
+  if (declaration.operations.includes('inspect') && typeof contract.inspect !== 'function' && typeof adapter.inspect !== 'function' && !adapter.planRemoval) return false
+  if (declaration.operations.includes('planRemoval') && typeof contract.planRemoval !== 'function' && typeof adapter.planRemoval !== 'function') return false
+  if (declaration.operations.includes('executeRemoval') && typeof contract.executeRemoval !== 'function' && typeof adapter.remove !== 'function') return false
+  if (declaration.operations.includes('verifyRemoval') && typeof contract.verifyRemoval !== 'function' && typeof adapter.verifyOutput !== 'function') return false
+  return true
+}
+
+function isDestructive(adapter: FormatAdapter): boolean {
+  return adapter.capability.operations.some(operation => destructiveOperations.has(operation)) || adapter.role === 'verifier' && adapter.capability.operations.includes('verify')
+}
+
 function matches(adapter: FormatAdapter, input: LocalInputDescriptor, operation: Operation) {
   if (!adapter.capability.operations.includes(operation)) return false
+  const declaration = contractDeclaration(adapter)
+  const canonicalOperation = contractOperationFor[operation]
+  if (declaration && canonicalOperation && !declaration.operations.includes(canonicalOperation)) return false
+  const extensions = declaration?.extensions ?? adapter.capability.extensions
+  const mimeTypes = declaration?.mimeTypes ?? adapter.capability.mimeTypes
   const extension = input.filename.split('.').pop()?.toLowerCase()
-  return Boolean((extension && adapter.capability.extensions.includes(extension)) || (input.mimeType && adapter.capability.mimeTypes.includes(input.mimeType)))
+  return Boolean((extension && extensions.includes(extension)) || (input.mimeType && mimeTypes.includes(input.mimeType)))
 }
 
 export function createFormatAdapterRegistry(): FormatAdapterRegistry {
@@ -59,6 +101,7 @@ export function createFormatAdapterRegistry(): FormatAdapterRegistry {
   return {
     register(adapter) {
       if (adapters.some(existing => existing.id === adapter.id)) return { ok: false, error: { code: 'INVALID_INPUT', message: `Adapter '${adapter.id}' is already registered.` } }
+      if (isDestructive(adapter) && !validContract(adapter)) return { ok: false, error: { code: 'INVALID_INPUT', message: 'Destructive adapters require a valid canonical AdapterContract and conformance declaration.' } }
       adapters.push(adapter)
       return { ok: true, value: undefined }
     },
@@ -95,7 +138,10 @@ export function createFormatAdapterRegistry(): FormatAdapterRegistry {
       return adapter ? { ok: true, value: adapter } : { ok: false, error: { code: 'UNSUPPORTED', message: 'No removal execution adapter is registered for this input.' } }
     },
     async resolveVerifiedVerifier(input, executorId, compatibilityKey, signal) {
-      const candidates = adapters.filter(candidate => candidate.capability.operations.includes('verify') && candidate.role === 'verifier' && typeof candidate.verifyOutput === 'function' && candidate.id !== executorId && candidate.verifierIndependence === 'structural-independent' && typeof candidate.probe === 'function' && typeof candidate.formatId === 'string' && candidate.formatId.trim() && (!compatibilityKey || candidate.verifierCompatibilityKey === compatibilityKey))
+      if (!compatibilityKey || !compatibilityKey.trim()) return { ok: false, error: { code: 'UNSUPPORTED', message: 'A verifier compatibility key is required for destructive execution.' } }
+      const executor = adapters.find(candidate => candidate.id === executorId)
+      if (!executor || executor.role !== 'transformer' || !executor.verifierCompatibilityKey || executor.verifierCompatibilityKey !== compatibilityKey) return { ok: false, error: { code: 'UNSUPPORTED', message: 'The destructive executor is not a compatible transformer.' } }
+      const candidates = adapters.filter(candidate => candidate.capability.operations.includes('verify') && candidate.role === 'verifier' && validContract(candidate) && candidate.contract?.conformance.independentVerifier === true && typeof candidate.verifyOutput === 'function' && candidate.id !== executorId && candidate.verifierIndependence === 'structural-independent' && typeof candidate.probe === 'function' && typeof candidate.formatId === 'string' && candidate.formatId.trim() && candidate.verifierCompatibilityKey === compatibilityKey)
       if (!candidates.length) return { ok: false, error: { code: 'UNSUPPORTED', message: 'No content-verified independent verifier is registered.' } }
       const matched: FormatAdapter[] = []
       for (const candidate of candidates) {

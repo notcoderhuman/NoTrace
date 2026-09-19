@@ -2,7 +2,7 @@ import type { OutputArtifact } from '../processing-core/domain/artifact'
 import type { ByteRange } from '../processing-core/domain/input'
 import type { BoundaryResult } from '../processing-core/domain/result'
 
-export function createMemoryArtifact(bytes: Uint8Array, filename: string, mediaType = 'image/jpeg'): OutputArtifact {
+export function createMemoryArtifact(bytes: Uint8Array, filename: string, mediaType?: string): OutputArtifact {
   const copy = new Uint8Array(bytes)
   const id = crypto.randomUUID()
   let disposed = false

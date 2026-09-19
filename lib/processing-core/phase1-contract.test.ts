@@ -131,7 +131,7 @@ async function main() {
   })
 
   await test('removal policy authorizes only structural COM targets', () => {
-    const target: RemovalTarget = { id: 'jpeg-com-0', kind: 'jpeg-segment', marker: 0xfe, ordinal: 0, startOffset: 2, endOffset: 7, category: 'comment', classification: 'SAFE_TO_REMOVE', removable: true, reason: 'Recognized comment segment.' }
+    const target: RemovalTarget = { id: 'jpeg-com-0', kind: 'jpeg-segment', marker: 0xfe, ordinal: 0, startOffset: 2, endOffset: 7, category: 'comment', scope: 'jpeg-com', classification: 'SAFE_TO_REMOVE', removable: true, reason: 'Recognized comment segment.' }
     assert.equal(canAuthorizeRemoval(target, phaseOneSafetyPolicy), true)
     assert.equal(phaseOneSafetyPolicy.preserveOriginal, true)
     assert.equal(phaseOneSafetyPolicy.failClosed, true)

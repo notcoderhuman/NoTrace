@@ -3,6 +3,9 @@ import type { OutputArtifact } from '../domain/artifact'
 import type { RemovalApproval, RemovalPlan } from '../domain/operation'
 import { JPEG_VERIFICATION_CHECK_IDS, type BoundaryResult, type VerificationResult } from '../domain/result'
 import { scanJpegForVerification, type IndependentJpegRecord } from './jpeg-verifier-scanner'
+import { JPEG_PROCESSING_IDENTITY } from '../domain/identity'
+import { structuralLimits } from '../classification/safety-policy'
+import type { AdapterContract, StaticCapabilityDeclaration, ResourceContract } from '../domain/contracts'
 
 async function sha256(bytes: Uint8Array): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', bytes)
@@ -87,11 +90,24 @@ export async function verifyJpegOutputIndependently(input: LocalInput, output: O
   return { ok: true, value: { kind: 'verification', status: 'success', input: input.descriptor, outputCreated: true, output, sourceFingerprint, identity: plan.identity, planId: plan.id, inputId: plan.input.id, approvedTargetIds: approval.approvedTargetIds, removalTrace: witnesses.map(witness => ({ ...witness })), checks, removedTargetIds: approval.approvedTargetIds, preservedTargetIds, warnings: [] } }
 }
 
+const jpegVerifierDeclaration: StaticCapabilityDeclaration = {
+  formatId: 'jpeg', operations: ['verifyRemoval'], extensions: ['jpg', 'jpeg'], mimeTypes: ['image/jpeg'], processingIdentity: JPEG_PROCESSING_IDENTITY, verifierCompatibilityKey: 'notrace-jpeg-com-v1',
+}
+const jpegVerifierResource: ResourceContract = {
+  inputBound: { maxBytes: structuralLimits.maxInputBytes, state: 'measured' }, fullBufferOperations: { state: 'inferred' }, streaming: { supported: false, state: 'measured' }, worker: { required: false, state: 'measured' }, transfer: { transferable: false, copies: true, state: 'inferred' }, temporaryAllocations: 'inferred', concurrency: { state: 'unmeasured' }, cancellationPoints: ['input read', 'verification'],
+}
+const jpegVerifierContract: AdapterContract = {
+  conformance: { level: 'verification-capable', declaration: jpegVerifierDeclaration, resource: jpegVerifierResource, independentVerifier: true },
+  verifyRemoval: async (context, output, plan, approval) => verifyJpegOutputIndependently(context.input, output, plan, approval, context.signal),
+}
+
 export const jpegVerifierAdapter = {
   id: 'jpeg-verifier',
   role: 'verifier' as const,
   formatId: 'jpeg', engineId: 'notrace-jpeg', engineVersion: '1', capabilityKey: 'jpeg:verify', verifierCompatibilityKey: 'notrace-jpeg-com-v1', verifierIndependence: 'structural-independent' as const, verificationCheckIds: JPEG_VERIFICATION_CHECK_IDS,
   probe: async (input: LocalInput, signal?: AbortSignal) => { const prefix = await input.read({ offset: 0, length: Math.min(2, input.descriptor.size ?? 2) }, signal); if (!prefix.ok) return prefix; return prefix.value.length === 2 && prefix.value[0] === 0xff && prefix.value[1] === 0xd8 ? { ok: true as const, value: { formatId: 'jpeg', mediaType: 'image/jpeg', confidence: 'structural' as const } } : { ok: false as const, error: { code: 'UNSUPPORTED' as const, message: 'Input is not a JPEG stream.' } } },
   capability: { extensions: ['jpg', 'jpeg'], mimeTypes: ['image/jpeg'], operations: ['verify'] as const },
+  conformance: jpegVerifierContract.conformance,
+  contract: jpegVerifierContract,
   verifyOutput: verifyJpegOutputIndependently,
 }

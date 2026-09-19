@@ -21,6 +21,8 @@ export type RemovalTarget = Readonly<{
   startOffset: number
   endOffset: number
   category: RemovalTargetCategory
+  /** Adapter-owned scope interpreted by central policy; absent scopes are never authorized. */
+  scope?: string
   classification: SafetyClassification
   removable: boolean
   reason: string

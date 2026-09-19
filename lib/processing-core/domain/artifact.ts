@@ -25,7 +25,7 @@ export function disposeArtifact(artifact: OutputArtifact | undefined): BoundaryR
   }
 }
 
-export function createMemoryArtifact(bytes: Uint8Array, filename: string, mediaType = 'image/jpeg'): OutputArtifact {
+export function createMemoryArtifact(bytes: Uint8Array, filename: string, mediaType?: string): OutputArtifact {
   const copy = new Uint8Array(bytes)
   const id = crypto.randomUUID()
   let disposed = false

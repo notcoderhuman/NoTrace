@@ -16,8 +16,8 @@ export function preserveWhenUncertain(classification: SafetyClassification): boo
 }
 
 export function canAuthorizeRemoval(target: RemovalTarget, policy: SafetyPolicy): boolean {
-  const scope: RemovalScope | undefined = target.category === 'comment' ? 'jpeg-com' : undefined
-  return target.kind === 'jpeg-segment' && target.removable && target.classification === 'SAFE_TO_REMOVE' && scope !== undefined && policy.allowedRemovalScopes.includes(scope) && policy.preserveOriginal && policy.failClosed && policy.retainInMemoryOnly && policy.preserveProtectedSegments && policy.preserveUnknownSegments && policy.requireIndependentVerification
+  const scope = target.scope as RemovalScope | undefined
+  return target.removable && target.classification === 'SAFE_TO_REMOVE' && scope !== undefined && policy.allowedRemovalScopes.includes(scope) && policy.preserveOriginal && policy.failClosed && policy.retainInMemoryOnly && policy.preserveProtectedSegments && policy.preserveUnknownSegments && policy.requireIndependentVerification
 }
 
 export function validateRemovalApproval(approval: RemovalApproval, plan: RemovalPlan): boolean {

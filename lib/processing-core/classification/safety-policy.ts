@@ -1,7 +1,7 @@
 import type { Operation } from '../domain/operation'
 
 /** Phase 1 defaults are fail-closed; real limits must be selected before parsing. */
-export type RemovalScope = 'jpeg-com'
+export type RemovalScope = 'jpeg-com' | (string & {})
 
 export type SafetyPolicy = Readonly<{
   maxInputBytes: number
