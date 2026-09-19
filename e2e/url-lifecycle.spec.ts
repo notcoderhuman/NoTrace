@@ -27,7 +27,7 @@ test('verified removal download accounts for object URL cleanup', async ({ page 
   await expect(page.locator('.verification-stage').getByText('INDEPENDENT VERIFICATION')).toBeVisible()
   await expect(page.getByText('Passed', { exact: true })).toBeVisible()
   const downloadPromise = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Download verified JPEG' }).click()
+  await page.getByRole('button', { name: 'Download verified output' }).click()
   const download = await downloadPromise
   expect(await download.path()).not.toBeNull()
   const lifecycle = await page.evaluate(() => (window as any).__urlLifecycle)
@@ -52,10 +52,10 @@ test('two rapid verified downloads each complete', async ({ page }) => {
   await expect(page.locator('.verification-stage').getByText('INDEPENDENT VERIFICATION')).toBeVisible()
   await expect(page.getByText('Passed', { exact: true })).toBeVisible()
   const first = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Download verified JPEG' }).click()
+  await page.getByRole('button', { name: 'Download verified output' }).click()
   const firstDownload = await first
   const second = page.waitForEvent('download')
-  await page.getByRole('button', { name: 'Download verified JPEG' }).click()
+  await page.getByRole('button', { name: 'Download verified output' }).click()
   const secondDownload = await second
   expect(await firstDownload.path()).not.toBeNull()
   expect(await secondDownload.path()).not.toBeNull()

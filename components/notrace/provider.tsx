@@ -297,12 +297,12 @@ export function PrototypeProvider({ children }: { children: ReactNode }) {
     removalAbort.current = controller
     setRemoval({ fileId, status: 'planning' })
     void (async () => {
-      let result = await planningBoundary.current!.planRemoval({ input, fieldIds: [], policy: input.descriptor.mimeType === 'image/png' ? 'png-text' : 'jpeg-com' }, { signal: controller.signal })
+      let result = await planningBoundary.current!.planRemoval({ input, fieldIds: [], policy: 'approved-targets' }, { signal: controller.signal })
       if (result.ok && result.value.removableTargetIds.length === 0) {
         const targetIds = result.value.targets
           .filter(target => target.removable && target.classification === 'SAFE_TO_REMOVE')
           .map(target => target.id)
-        if (targetIds.length) result = await planningBoundary.current!.planRemoval({ input, fieldIds: targetIds, policy: input.descriptor.mimeType === 'image/png' ? 'png-text' : 'jpeg-com' }, { signal: controller.signal })
+        if (targetIds.length) result = await planningBoundary.current!.planRemoval({ input, fieldIds: targetIds, policy: 'approved-targets' }, { signal: controller.signal })
       }
       if (!removalLifecycle.current.isCurrent(operation, fileId, input.descriptor.id) || controller.signal.aborted || requestId !== removalRequest.current || selectedId !== fileId || localInputs.current.get(fileId) !== input) return
       if (result.ok) setRemoval({ fileId, status: result.value.status === 'ready' ? (result.value.removableTargetIds.length ? 'ready' : 'ready-empty') : 'idle', plan: result.value, selectedTargetIds: [] } as RemovalState)
