@@ -1,4 +1,4 @@
-import type { FormatAdapterRegistry } from '../processing-core/adapters/registry'
+import { canonicalVerificationCheckIds, type FormatAdapterRegistry } from '../processing-core/adapters/registry'
 import type { LocalProcessingBoundary, BoundaryOptions } from '../processing-core/domain/boundary'
 import type { LocalInput } from '../processing-core/domain/input'
 import type { InspectionResult } from '../processing-core/domain/metadata'
@@ -86,8 +86,12 @@ export function createProcessingBoundary(registry: FormatAdapterRegistry): Local
         if (!verified.ok) { disposeOnce(executionArtifact); for (const artifact of observedArtifacts(verified)) disposeOnce(artifact); return verified }
         replacement = verified.value.output
         if (options?.signal?.aborted) { disposeOnce(executionArtifact); disposeOnce(replacement); return { ok: false, error: { code: 'CANCELLED', message: 'Removal was cancelled.' } } }
-        if (!(await validVerification(request, verified.value, executionArtifact, verifier.value.verificationCheckIds, verifier.value.capability.mimeTypes[0]))) { disposeOnce(executionArtifact); disposeOnce(replacement); return { ok: false, error: { code: 'VERIFICATION_FAILED', message: 'Independent verification did not pass.' } } }
-        return { ok: true, value: { ...execution.value, identity: verified.value.identity, verification: verified.value, outputVerification: 'passed', output: { ...execution.value.output, artifact: executionArtifact }, removedTargetIds: verified.value.removedTargetIds, preservedTargetIds: verified.value.preservedTargetIds, warnings: verified.value.warnings } }
+        // The expected check set comes from the verifier's canonical contract declaration — never
+        // from the verification result under validation.
+        const declaredCheckIds = canonicalVerificationCheckIds(verifier.value)
+        const verificationPassed = declaredCheckIds ? await validVerification(request, verified.value, executionArtifact, declaredCheckIds, verifier.value.capability.mimeTypes[0]) : false
+        if (!declaredCheckIds || !verificationPassed) { disposeOnce(executionArtifact); disposeOnce(replacement); return { ok: false, error: { code: 'VERIFICATION_FAILED', message: 'Independent verification did not pass.' } } }
+        return { ok: true, value: { ...execution.value, identity: verified.value.identity, verification: verified.value, verificationCheckIds: [...declaredCheckIds], outputVerification: 'passed', output: { ...execution.value.output, artifact: executionArtifact }, removedTargetIds: verified.value.removedTargetIds, preservedTargetIds: verified.value.preservedTargetIds, warnings: verified.value.warnings } }
       } catch { disposeOnce(executionArtifact); disposeOnce(replacement); return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Local processing could not be completed.' } } }
     },
     async verify(_input): Promise<BoundaryResult<VerificationResult>> { return { ok: false, error: { code: 'UNSUPPORTED', message: 'Use removal execution for independent output verification.' } } }

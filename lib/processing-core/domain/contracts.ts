@@ -16,6 +16,12 @@ export type StaticCapabilityDeclaration = Readonly<{
   /** NoTrace-owned identity for the implementation and its verifier compatibility. */
   processingIdentity?: ProcessingIdentity
   verifierCompatibilityKey?: string
+  /**
+   * NoTrace-owned canonical identities of the verification checks this format declares.
+   * This is the authoritative source of the *expected* check set. A VerificationResult
+   * reports checks; it never defines what checks were expected.
+   */
+  verificationCheckIds?: readonly string[]
 }>
 
 export type EvidenceValueState = 'detected' | 'not-detected' | 'unknown' | 'unsupported' | 'protected'

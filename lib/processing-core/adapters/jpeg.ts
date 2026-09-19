@@ -1,11 +1,11 @@
 import type { LocalInput } from '../domain/input'
 import type { InspectionResult, MetadataField } from '../domain/metadata'
 import type { EvidenceRecord, StaticCapabilityDeclaration, ResourceContract, AdapterConformance } from '../domain/contracts'
-import type { BoundaryResult } from '../domain/result'
+import { JPEG_VERIFICATION_CHECK_IDS, type BoundaryResult } from '../domain/result'
 import { createMemoryArtifact } from '../domain/artifact'
 import { validateRemovalApproval, canAuthorizeRemoval } from '../classification/policy'
 import type { FormatAdapter } from './registry'
-import type { ProcessingResult, RemovalApproval, RemovalPlan, RemovalTarget, RemovalWitness, RemovalTraceEntry } from '../domain/operation'
+import type { ProcessingResult, RemovalApproval, RemovalPlan, RemovalTarget, RemovalTraceEntry } from '../domain/operation'
 import { phaseOneSafetyPolicy, type SafetyPolicy, structuralLimits } from '../classification/safety-policy'
 import { JPEG_PROCESSING_IDENTITY } from '../domain/identity'
 import { probePrefix } from '../domain/probe'
@@ -24,6 +24,8 @@ export const jpegCapabilityDeclaration: StaticCapabilityDeclaration = {
   mimeTypes: ['image/jpeg'],
   processingIdentity: JPEG_PROCESSING_IDENTITY,
   verifierCompatibilityKey: 'notrace-jpeg-com-v1',
+  /** Canonical expected verification checks; the sole source of truth for the JPEG check set. */
+  verificationCheckIds: JPEG_VERIFICATION_CHECK_IDS,
 }
 
 export const jpegResourceContract: ResourceContract = {
@@ -43,8 +45,6 @@ export const jpegConformance: AdapterConformance = {
   resource: jpegResourceContract,
   independentVerifier: true,
 }
-
-const verificationNames = ['output-soi', 'output-eoi', 'segment-structure', 'output-size', 'segment-count', 'approved-com-absent', 'preserved-targets-present', 'image-bytes-preserved', 'retained-segments-preserved', 'retained-order-preserved', 'no-unexpected-changes', 'original-unchanged', 'distinct-artifact'] as const
 
 export type JpegSegmentKind = 'soi' | 'comment' | 'xmp' | 'exif' | 'icc' | 'app' | 'image' | 'eoi'
 export type JpegSegmentInventory = Readonly<{
@@ -263,49 +263,6 @@ export async function planJpegRemoval(input: LocalInput, requestedTargetIds: rea
   return createJpegRemovalPlan(input, inventory.value, requestedTargetIds, phaseOneSafetyPolicy)
 }
 
-function verificationChecks(status: 'passed' | 'failed' | 'not-run') {
-  return verificationNames.map(id => ({ id, name: id, status }))
-}
-
-export async function verifyJpegOutput(input: LocalInput, output: import('../domain/artifact').OutputArtifact, plan: RemovalPlan, approval: RemovalApproval, signal?: AbortSignal): Promise<BoundaryResult<import('../domain/result').VerificationResult>> {
-  if (signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Verification was cancelled.' } }
-  const original = await input.read(undefined, signal)
-  if (!original.ok) return original
-  const originalAgain = await input.read(undefined, signal)
-  if (!originalAgain.ok) return originalAgain
-  const generated = await output.read(undefined, signal)
-  if (!generated.ok) return generated
-  const failed = (message: string, id: string): BoundaryResult<import('../domain/result').VerificationResult> => ({ ok: false, error: { code: 'VERIFICATION_FAILED', message: `${message} [${id}]` } })
-  if (output.id === input.descriptor.id) return failed('Output artifact identity is not distinct.', 'distinct-artifact')
-  if (original.value.length !== originalAgain.value.length || original.value.some((value, index) => value !== originalAgain.value[index])) return failed('Original input changed during verification.', 'original-unchanged')
-  if (generated.value.length > structuralLimits.maxOutputBytes) return failed('Output exceeds the configured size limit.', 'output-size')
-  const originalHash = await fingerprint(original.value, signal)
-  if (!originalHash.ok) return originalHash
-  if (originalHash.value !== plan.sourceFingerprint || approval.sourceFingerprint !== plan.sourceFingerprint) return failed('Original input does not match the approved source.', 'source-fingerprint')
-  if (new Set(approval.approvedTargetIds).size !== approval.approvedTargetIds.length) return failed('Approval contains duplicate targets.', 'approval-binding')
-  const source = inspectSegments(original.value, signal)
-  const observed = inspectSegments(generated.value, signal)
-  if (!source.ok || !observed.ok) return failed('JPEG structure could not be independently verified.', 'segment-structure')
-  const approved = new Set(approval.approvedTargetIds)
-  const witnesses = plan.removalWitnesses.filter(witness => approved.has(witness.targetId))
-  if (witnesses.length !== approved.size || witnesses.some(witness => witness.sourceFingerprint !== plan.sourceFingerprint || witness.rangeLength !== witness.endOffset - witness.startOffset)) return failed('Removal witness does not match the approved source.', 'target-witness')
-  const sourceSegments = source.value.inventory.segments
-  const outputSegments = observed.value.inventory.segments
-  const approvedSegments = sourceSegments.filter(segment => segment.target && approved.has(segment.target.id))
-  if (approvedSegments.length !== approved.size) return failed('Approved COM targets are not present in the original inventory.', 'approved-com-absent')
-  if (approvedSegments.some(segment => segment.kind !== 'comment' || segment.target?.category !== 'comment')) return failed('Only COM targets may be verified for removal.', 'approved-com-absent')
-  const retainedSource = sourceSegments.filter(segment => !segment.target || !approved.has(segment.target.id))
-  if (outputSegments.length !== retainedSource.length) return failed('Unexpected JPEG segment insertion or deletion detected.', 'no-unexpected-changes')
-  for (let index = 0; index < retainedSource.length; index++) {
-    const expected = original.value.slice(retainedSource[index].startOffset, retainedSource[index].endOffset)
-    const actual = generated.value.slice(outputSegments[index].startOffset, outputSegments[index].endOffset)
-    if (expected.length !== actual.length || expected.some((value, byte) => value !== actual[byte])) return failed('A retained JPEG segment changed or moved.', 'retained-segments-preserved')
-  }
-  const preservedTargetIds = sourceSegments.flatMap(segment => segment.target && !approved.has(segment.target.id) ? [segment.target.id] : [])
-  const removalTrace = witnesses.map(witness => ({ ...witness }))
-  return { ok: true, value: { kind: 'verification', status: 'success', input: input.descriptor, outputCreated: true, output, sourceFingerprint: source.value.inventory.sourceFingerprint, identity: JPEG_PROCESSING_IDENTITY, planId: plan.id, inputId: plan.input.id, approvedTargetIds: approval.approvedTargetIds, removalTrace, checks: verificationChecks('passed'), removedTargetIds: approvedSegments.map(segment => segment.target!.id), preservedTargetIds, warnings: [] } }
-}
-
 export async function removeJpegCom(input: LocalInput, plan: RemovalPlan, approval: RemovalApproval, signal?: AbortSignal): Promise<BoundaryResult<ProcessingResult>> {
   const invalid = { ok: false as const, error: { code: 'INVALID_INPUT' as const, message: 'Removal approval is invalid.' } }
   if (!validateRemovalApproval(approval, plan) || approval.inputId !== input.descriptor.id || approval.sourceFingerprint !== plan.sourceFingerprint || new Set(approval.approvedTargetIds).size !== approval.approvedTargetIds.length) return invalid
@@ -381,7 +338,7 @@ export const jpegContract: AdapterContract = {
 export const jpegAdapter: FormatAdapter & { inspect: typeof inspectJpeg } = {
   id: 'jpeg-inspection',
   role: 'transformer',
-  formatId: 'jpeg', engineId: 'notrace-jpeg', engineVersion: '1', capabilityKey: 'jpeg:remove-com', verifierCompatibilityKey: 'notrace-jpeg-com-v1', verificationCheckIds: verificationNames,
+  formatId: 'jpeg', engineId: 'notrace-jpeg', engineVersion: '1', capabilityKey: 'jpeg:remove-com', verifierCompatibilityKey: 'notrace-jpeg-com-v1', verificationCheckIds: JPEG_VERIFICATION_CHECK_IDS,
   probe: async (input, signal) => { const prefix = await probePrefix(input, 2, signal); if (!prefix.ok) return prefix; return prefix.value.length === 2 && prefix.value[0] === 0xff && prefix.value[1] === 0xd8 ? { ok: true, value: { formatId: 'jpeg', mediaType: 'image/jpeg', confidence: 'structural' as const } } : { ok: false, error: { code: 'UNSUPPORTED' as const, message: 'Input is not a JPEG stream.' } } },
   capability: { extensions: ['jpg', 'jpeg'], mimeTypes: ['image/jpeg'], operations: ['inspect', 'remove'] },
   conformance: jpegConformance,

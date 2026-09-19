@@ -92,6 +92,8 @@ export async function verifyJpegOutputIndependently(input: LocalInput, output: O
 
 const jpegVerifierDeclaration: StaticCapabilityDeclaration = {
   formatId: 'jpeg', operations: ['verifyRemoval'], extensions: ['jpg', 'jpeg'], mimeTypes: ['image/jpeg'], processingIdentity: JPEG_PROCESSING_IDENTITY, verifierCompatibilityKey: 'notrace-jpeg-com-v1',
+  /** Canonical expected verification checks; the sole source of truth for the JPEG check set. */
+  verificationCheckIds: JPEG_VERIFICATION_CHECK_IDS,
 }
 const jpegVerifierResource: ResourceContract = {
   inputBound: { maxBytes: structuralLimits.maxInputBytes, state: 'measured' }, fullBufferOperations: { state: 'inferred' }, streaming: { supported: false, state: 'measured' }, worker: { required: false, state: 'measured' }, transfer: { transferable: false, copies: true, state: 'inferred' }, temporaryAllocations: 'inferred', concurrency: { state: 'unmeasured' }, cancellationPoints: ['input read', 'verification'],

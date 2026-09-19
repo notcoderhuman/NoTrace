@@ -90,6 +90,12 @@ export type ProcessingResult = Readonly<{
   outputVerification: 'not-run' | 'passed'
   /** Authoritative verifier result propagated for presentation projection only. */
   verification?: import('./result').VerificationResult
+  /**
+   * NoTrace-owned canonical check identities the verifier was required to report, stamped by the
+   * boundary from the verifier's canonical contract declaration. Presentation and settlement read
+   * expectations from here — never from `verification.checks`.
+   */
+  verificationCheckIds?: readonly string[]
   identity?: ProcessingIdentity
   removalTrace?: readonly RemovalTraceEntry[]
   removedTargetIds: readonly string[]

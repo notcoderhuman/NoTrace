@@ -5,7 +5,7 @@ import type { ContentProbe } from '../domain/probe'
 import type { LocalInput } from '../domain/input'
 import type { InspectionResult } from '../domain/metadata'
 import type { ProcessingResult, RemovalPlan } from '../domain/operation'
-import { isStaticCapabilityDeclaration, isEvidenceRecord, type AdapterContract, type AdapterConformance, type EvidenceRecord, type FormatOperation } from '../domain/contracts'
+import { isStaticCapabilityDeclaration, isEvidenceRecord, type AdapterContract, type AdapterConformance, type EvidenceRecord, type FormatOperation, type StaticCapabilityDeclaration, type ResourceContract } from '../domain/contracts'
 
 export type AdapterCapability = Readonly<{
   extensions: readonly string[]
@@ -51,6 +51,108 @@ export interface FormatAdapterRegistry {
 const destructiveOperations = new Set<Operation>(['remove'])
 const contractOperationFor: Partial<Record<Operation, FormatOperation>> = { inspect: 'inspect', remove: 'executeRemoval', verify: 'verifyRemoval' }
 
+function frozenList<T>(values: readonly T[]): readonly T[] {
+  return Object.freeze([...values])
+}
+
+function frozenOptionalList<T>(values: readonly T[] | undefined): readonly T[] | undefined {
+  return values === undefined ? undefined : Object.freeze([...values])
+}
+
+function frozenDeclaration(declaration: StaticCapabilityDeclaration): StaticCapabilityDeclaration {
+  return Object.freeze({
+    formatId: declaration.formatId,
+    operations: frozenList(declaration.operations),
+    extensions: frozenList(declaration.extensions),
+    mimeTypes: frozenList(declaration.mimeTypes),
+    processingIdentity: declaration.processingIdentity ? Object.freeze({ ...declaration.processingIdentity }) : undefined,
+    verifierCompatibilityKey: declaration.verifierCompatibilityKey,
+    verificationCheckIds: frozenOptionalList(declaration.verificationCheckIds),
+  })
+}
+
+function frozenResource(resource: ResourceContract): ResourceContract {
+  return Object.freeze({
+    ...resource,
+    inputBound: Object.freeze({ ...resource.inputBound }),
+    fullBufferOperations: Object.freeze({ ...resource.fullBufferOperations }),
+    streaming: Object.freeze({ ...resource.streaming }),
+    worker: Object.freeze({ ...resource.worker }),
+    transfer: Object.freeze({ ...resource.transfer }),
+    concurrency: Object.freeze({ ...resource.concurrency }),
+    cancellationPoints: frozenList(resource.cancellationPoints),
+  })
+}
+
+function frozenConformance(conformance: AdapterConformance): AdapterConformance {
+  return Object.freeze({
+    level: conformance.level,
+    declaration: frozenDeclaration(conformance.declaration),
+    resource: frozenResource(conformance.resource),
+    independentVerifier: conformance.independentVerifier,
+  })
+}
+
+function frozenContract(contract: AdapterContract): AdapterContract {
+  return Object.freeze({ ...contract, conformance: frozenConformance(contract.conformance) })
+}
+
+/**
+ * Registry-owned immutable snapshot of the adapter metadata the registry uses to make authority
+ * decisions. Every nested array and object is copied and frozen so mutating the caller's adapter
+ * after registration can never change registry behaviour. Implementation functions are shared by
+ * reference out of necessity; they are never an authority decision.
+ */
+function snapshotAdapter(adapter: FormatAdapter): FormatAdapter {
+  return Object.freeze({
+    ...adapter,
+    capability: Object.freeze({
+      extensions: frozenList(adapter.capability.extensions),
+      mimeTypes: frozenList(adapter.capability.mimeTypes),
+      operations: frozenList(adapter.capability.operations),
+    }),
+    verificationCheckIds: frozenOptionalList(adapter.verificationCheckIds),
+    conformance: adapter.conformance ? frozenConformance(adapter.conformance) : undefined,
+    contract: adapter.contract ? frozenContract(adapter.contract) : undefined,
+  })
+}
+
+function validateAdapterShape(adapter: FormatAdapter): BoundaryResult<void> {
+  if (!adapter || typeof adapter !== 'object') return { ok: false, error: { code: 'INVALID_INPUT', message: 'A format adapter object is required.' } }
+  if (typeof adapter.id !== 'string' || !adapter.id.trim()) return { ok: false, error: { code: 'INVALID_INPUT', message: 'A format adapter identity is required.' } }
+  const capability = adapter.capability as AdapterCapability | undefined
+  if (!capability || typeof capability !== 'object' || !Array.isArray(capability.extensions) || !Array.isArray(capability.mimeTypes) || !Array.isArray(capability.operations)) {
+    return { ok: false, error: { code: 'INVALID_INPUT', message: 'A format adapter requires a capability with extensions, mimeTypes and operations arrays.' } }
+  }
+  return { ok: true, value: undefined }
+}
+
+function sameStringSet(left: readonly string[], right: readonly string[]): boolean {
+  if (left.length !== right.length) return false
+  const expected = new Set(right)
+  return expected.size === right.length && left.every(value => expected.has(value))
+}
+
+/**
+ * A declaration may only omit its check identities when it makes no verification claim. A
+ * verification claim without a canonical, non-empty, duplicate-free check set is not admissible.
+ */
+function validDeclaredCheckIds(declaration: StaticCapabilityDeclaration): boolean {
+  const ids = declaration.verificationCheckIds
+  if (ids === undefined) return !declaration.operations.includes('verifyRemoval')
+  if (ids.length === 0 || new Set(ids).size !== ids.length) return false
+  return ids.every(id => typeof id === 'string' && id.trim().length > 0)
+}
+
+/**
+ * The canonical check identities a verifier must report. Sourced from the adapter's frozen contract
+ * declaration; the adapter-level field is only a fallback for contract-less inspection adapters.
+ * Never derived from a VerificationResult.
+ */
+export function canonicalVerificationCheckIds(adapter: FormatAdapter): readonly string[] | undefined {
+  return adapter.contract?.conformance.declaration.verificationCheckIds ?? adapter.verificationCheckIds
+}
+
 function contractDeclaration(adapter: FormatAdapter) {
   return adapter.contract?.conformance.declaration
 }
@@ -74,6 +176,8 @@ function validContract(adapter: FormatAdapter): boolean {
   if (!declaration.extensions.every(value => adapter.capability.extensions.includes(value)) || !declaration.mimeTypes.every(value => adapter.capability.mimeTypes.includes(value))) return false
   const exposed = adapter.capability.operations.map(operation => contractOperationFor[operation]).filter(Boolean) as FormatOperation[]
   if (!exposed.every(operation => declaration.operations.includes(operation))) return false
+  if (!validDeclaredCheckIds(declaration)) return false
+  if (declaration.verificationCheckIds && adapter.verificationCheckIds && !sameStringSet(adapter.verificationCheckIds, declaration.verificationCheckIds)) return false
   if (declaration.operations.includes('inspect') && typeof contract.inspect !== 'function' && typeof adapter.inspect !== 'function' && !adapter.planRemoval) return false
   if (declaration.operations.includes('planRemoval') && typeof contract.planRemoval !== 'function' && typeof adapter.planRemoval !== 'function') return false
   if (declaration.operations.includes('executeRemoval') && typeof contract.executeRemoval !== 'function' && typeof adapter.remove !== 'function') return false
@@ -100,9 +204,12 @@ export function createFormatAdapterRegistry(): FormatAdapterRegistry {
   const adapters: FormatAdapter[] = []
   return {
     register(adapter) {
+      const shape = validateAdapterShape(adapter)
+      if (!shape.ok) return shape
       if (adapters.some(existing => existing.id === adapter.id)) return { ok: false, error: { code: 'INVALID_INPUT', message: `Adapter '${adapter.id}' is already registered.` } }
-      if (isDestructive(adapter) && !validContract(adapter)) return { ok: false, error: { code: 'INVALID_INPUT', message: 'Destructive adapters require a valid canonical AdapterContract and conformance declaration.' } }
-      adapters.push(adapter)
+      const snapshot = snapshotAdapter(adapter)
+      if (isDestructive(snapshot) && !validContract(snapshot)) return { ok: false, error: { code: 'INVALID_INPUT', message: 'Destructive adapters require a valid canonical AdapterContract and conformance declaration.' } }
+      adapters.push(snapshot)
       return { ok: true, value: undefined }
     },
     resolve(input, operation) {
@@ -110,7 +217,11 @@ export function createFormatAdapterRegistry(): FormatAdapterRegistry {
       return adapter ? { ok: true, value: adapter } : { ok: false, error: { code: 'UNSUPPORTED', message: `No adapter is registered for ${operation}.` } }
     },
     async resolveVerified(input, operation, signal) {
-      const candidates = adapters.filter(candidate => candidate.capability.operations.includes(operation) && typeof candidate.probe === 'function' && typeof candidate.formatId === 'string' && candidate.formatId.trim())
+      const destructive = destructiveOperations.has(operation)
+      const candidates = adapters.filter(candidate => candidate.capability.operations.includes(operation)
+        && typeof candidate.probe === 'function'
+        && typeof candidate.formatId === 'string' && candidate.formatId.trim()
+        && (!destructive || (candidate.role === 'transformer' && validContract(candidate) && typeof candidate.verifierCompatibilityKey === 'string' && candidate.verifierCompatibilityKey.trim().length > 0)))
       if (!candidates.length) return { ok: false, error: { code: 'UNSUPPORTED', message: `No content-probing adapter is registered for ${operation}.` } }
       const matched: FormatAdapter[] = []
       for (const candidate of candidates) {
@@ -134,7 +245,7 @@ export function createFormatAdapterRegistry(): FormatAdapterRegistry {
       return adapter ? { ok: true, value: adapter } : { ok: false, error: { code: 'UNSUPPORTED', message: 'No removal planning adapter is registered for this input.' } }
     },
     resolveRemoval(input) {
-      const adapter = adapters.find(candidate => matches(candidate, input, 'remove') && typeof candidate.remove === 'function')
+      const adapter = adapters.find(candidate => matches(candidate, input, 'remove') && typeof candidate.remove === 'function' && validContract(candidate))
       return adapter ? { ok: true, value: adapter } : { ok: false, error: { code: 'UNSUPPORTED', message: 'No removal execution adapter is registered for this input.' } }
     },
     async resolveVerifiedVerifier(input, executorId, compatibilityKey, signal) {
