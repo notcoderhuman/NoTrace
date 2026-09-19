@@ -24,7 +24,7 @@ function isFixture(bytes: Uint8Array): boolean { return bytes.length >= PREFIX.l
 function target(bytes: Uint8Array): RemovalTarget {
   const startOffset = PREFIX.length
   const endOffset = bytes.length
-  return { id: 'test-text-marker-0', kind: 'format-target', marker: 0, ordinal: 0, startOffset, endOffset, category: 'comment', scope: 'test-text-marker', classification: 'SAFE_TO_REMOVE', removable: true, reason: 'Explicit test marker.' }
+  return { id: 'test-text-marker-0', kind: 'format-target', marker: 0, ordinal: 0, startOffset, endOffset, category: 'comment', formatId: FORMAT, typeId: 'test-text-marker', scope: { formatId: FORMAT, scopeId: 'test-text-marker' }, classification: 'SAFE_TO_REMOVE', removable: true, reason: 'Explicit test marker.' }
 }
 
 export function createTestTextFixture(content = `keep ${MARKER} protected`): Uint8Array { return concat(PREFIX, encode(content)) }
@@ -32,10 +32,10 @@ export function createTestTextFixture(content = `keep ${MARKER} protected`): Uin
 export function createTestTextAdapters(): { transformer: FormatAdapter; verifier: FormatAdapter } {
   const capability = { extensions: ['ntxt'], mimeTypes: [MEDIA], operations: ['inspect', 'remove'] as const }
   const verifierCapability = { extensions: ['ntxt'], mimeTypes: [MEDIA], operations: ['verify'] as const }
-  const declaration: StaticCapabilityDeclaration = { formatId: FORMAT, operations: ['inspect', 'executeRemoval'], extensions: ['ntxt'], mimeTypes: [MEDIA], processingIdentity: IDENTITY, verifierCompatibilityKey: IDENTITY.verifierCompatibilityKey }
+  const declaration: StaticCapabilityDeclaration = { formatId: FORMAT, operations: ['inspect', 'planRemoval', 'executeRemoval'], extensions: ['ntxt'], mimeTypes: [MEDIA], processingIdentity: IDENTITY, verifierCompatibilityKey: IDENTITY.verifierCompatibilityKey }
   const verifierDeclaration: StaticCapabilityDeclaration = { formatId: FORMAT, operations: ['verifyRemoval'], extensions: ['ntxt'], mimeTypes: [MEDIA], processingIdentity: IDENTITY, verifierCompatibilityKey: IDENTITY.verifierCompatibilityKey, verificationCheckIds: CHECKS }
   const resource: ResourceContract = { inputBound: { maxBytes: 1024 * 1024, state: 'measured' }, fullBufferOperations: { state: 'measured' }, streaming: { supported: false, state: 'measured' }, worker: { required: false, state: 'measured' }, transfer: { transferable: false, copies: true, state: 'inferred' }, temporaryAllocations: 'inferred', concurrency: { state: 'unmeasured' }, cancellationPoints: ['input read'] }
-  const evidence = (result: any): readonly EvidenceRecord[] => result.fields.map((field: any) => ({ id: field.id, label: field.label, category: field.category, state: 'detected', safety: 'safe-to-remove', explanation: field.value ?? 'detected', source: 'simulated-fixture', confidence: 'high' }))
+  const evidence = (result: any): readonly EvidenceRecord[] => result.fields.map((field: any) => ({ id: field.id, label: field.label, category: field.category, state: 'detected', safety: 'safe-to-remove', targetId: field.id, explanation: field.value ?? 'detected', source: 'simulated-fixture', confidence: 'high' }))
   const conformance: AdapterConformance = { level: 'removal-capable', declaration, resource }
   const verifierConformance: AdapterConformance = { level: 'verification-capable', declaration: verifierDeclaration, resource, independentVerifier: true }
   const transformer: FormatAdapter = {

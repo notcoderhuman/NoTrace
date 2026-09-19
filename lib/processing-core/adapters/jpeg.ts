@@ -193,14 +193,14 @@ function inspectSegments(bytes: Uint8Array, signal?: AbortSignal): BoundaryResul
     const ordinalKey = classified.category ?? classified.kind
     const ordinal = counts.get(ordinalKey) ?? 0
     counts.set(ordinalKey, ordinal + 1)
-    const target = classified.category && classified.classification ? { id: `jpeg-${classified.category === 'unknown' ? `app-${marker.toString(16)}` : classified.category}-${ordinal}`, kind: 'jpeg-segment' as const, marker, category: classified.category, scope: classified.category === 'comment' ? 'jpeg-com' : undefined, classification: classified.classification, removable: classified.removable, reason: classified.reason ?? 'Preserved by structural policy.', ordinal, startOffset, endOffset: offset + length } : undefined
+    const target = classified.category && classified.classification ? { id: `jpeg-${classified.category === 'unknown' ? `app-${marker.toString(16)}` : classified.category}-${ordinal}`, formatId: 'jpeg', kind: 'jpeg-segment' as const, typeId: `jpeg-marker-${marker.toString(16)}`, marker, category: classified.category, scope: classified.category === 'comment' ? { formatId: 'jpeg', scopeId: 'jpeg-com' } : undefined, classification: classified.classification, removable: classified.removable, reason: classified.reason ?? 'Preserved by structural policy.', ordinal, startOffset, endOffset: offset + length } : undefined
     segments.push({ index: segments.length, kind: classified.kind, marker, startOffset, endOffset: offset + length, payloadLength, target })
     if (marker >= 0xe0 && marker <= 0xef) metadataBytes += payloadLength
     if (metadataBytes > JPEG_MAX_TOTAL_METADATA_BYTES) return { ok: false, error: { code: 'LIMIT_EXCEEDED', message: 'JPEG metadata exceeds the structural limit.' } }
     if (marker === APP1 && ascii(payload, 0, 6) === 'Exif\0\0') fields.push(...exifFields(payload))
     else if (marker === APP1 && ascii(payload, 0, 29).startsWith('http://ns.adobe.com/xap/1.0/')) fields.push(field('xmp-present', 'XMP metadata', 'XMP', 'Present', 'UNKNOWN'))
     else if (marker === APP2 && ascii(payload, 0, 12) === 'ICC_PROFILE\0') fields.push(field('icc-profile', 'ICC color profile', 'other', 'Present', 'PROTECTED'))
-    else if (marker === COM) fields.push(field(`comment-${fields.length}`, 'JPEG comment', 'other', `Present (${payload.length} bytes)`, 'UNKNOWN'))
+    else if (marker === COM) fields.push(field(`comment-${ordinal}`, 'JPEG comment', 'other', `Present (${payload.length} bytes)`, 'SAFE_TO_REMOVE'))
     offset += length
     if (marker === 0xda) {
       const scan = findScanMarker(bytes, offset, signal)
@@ -225,7 +225,7 @@ export function jpegEvidenceFromInspection(result: InspectionResult): readonly E
     safety: fieldValue.classification === 'SAFE_TO_REMOVE' ? 'safe-to-remove' : fieldValue.classification === 'EDITABLE' ? 'editable' : fieldValue.classification === 'PROTECTED' ? 'protected' : fieldValue.classification === 'UNSUPPORTED' ? 'unsupported' : 'unknown',
     explanation: fieldValue.value || `${fieldValue.label} was not established by the local inspection.`,
     source: 'local-inspection',
-    targetId: fieldValue.classification === 'SAFE_TO_REMOVE' ? fieldValue.id : undefined,
+    targetId: fieldValue.classification === 'SAFE_TO_REMOVE' ? `jpeg-comment-${fieldValue.id.replace(/^comment-/, '')}` : undefined,
     confidence: 'high',
   }))
 }
@@ -254,7 +254,7 @@ export async function createJpegRemovalPlan(input: LocalInput, inventory: JpegSt
   const unknownRequests = requestedTargetIds.filter(id => !targets.some(target => target.id === id))
   const warnings = targets.filter(target => !target.removable).map(target => `${target.id}: ${target.reason}`)
   if (unknownRequests.length) warnings.push(...unknownRequests.map(id => `${id}: target was not found in the structural inventory.`))
-  return { ok: true, value: { id: `plan-${input.descriptor.id}-${inventory.inputSize}-${sourceHash.value.slice(0, 16)}`, status: removableTargetIds.length ? 'ready' : 'unsupported', identity: JPEG_PROCESSING_IDENTITY, input: input.descriptor, sourceFingerprint: sourceHash.value, targets, removableTargetIds, preservedTargetIds, warnings, requiresApproval: true, removableFieldIds: [], preservedFieldIds: [], removalWitnesses: targets.filter(target => removableTargetIds.includes(target.id)).map(target => ({ sourceFingerprint: sourceHash.value, targetId: target.id, ordinal: target.ordinal, startOffset: target.startOffset, endOffset: target.endOffset, marker: target.marker, rangeLength: target.endOffset - target.startOffset })) } }
+  return { ok: true, value: { id: `plan-${input.descriptor.id}-${inventory.inputSize}-${sourceHash.value.slice(0, 16)}`, status: removableTargetIds.length ? 'ready' : 'unsupported', identity: JPEG_PROCESSING_IDENTITY, input: input.descriptor, sourceFingerprint: sourceHash.value, targets, removableTargetIds, preservedTargetIds, warnings, requiresApproval: true, removableFieldIds: [], preservedFieldIds: [], removalWitnesses: targets.filter(target => removableTargetIds.includes(target.id)).map(target => ({ sourceFingerprint: sourceHash.value, targetId: target.id, ordinal: target.ordinal, startOffset: target.startOffset, endOffset: target.endOffset, marker: target.marker!, rangeLength: target.endOffset - target.startOffset })) } }
 }
 
 export async function planJpegRemoval(input: LocalInput, requestedTargetIds: readonly string[], _policyName: string, signal?: AbortSignal): Promise<BoundaryResult<RemovalPlan>> {

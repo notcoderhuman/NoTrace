@@ -93,22 +93,26 @@ export type ContractErrorCode = BoundaryErrorCode | 'STALE_OPERATION' | 'OWNERSH
 export function isStaticCapabilityDeclaration(value: unknown): value is StaticCapabilityDeclaration {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<StaticCapabilityDeclaration>
+  const strings = (items: unknown): items is readonly string[] => Array.isArray(items) && items.length > 0 && items.every(item => typeof item === 'string' && item.trim().length > 0) && new Set(items).size === items.length
   return typeof candidate.formatId === 'string' && candidate.formatId.trim().length > 0
-    && Array.isArray(candidate.operations) && candidate.operations.length > 0
-    && Array.isArray(candidate.extensions) && Array.isArray(candidate.mimeTypes)
+    && Array.isArray(candidate.operations) && candidate.operations.length > 0 && new Set(candidate.operations).size === candidate.operations.length
+    && strings(candidate.extensions) && strings(candidate.mimeTypes)
+    && (candidate.verificationCheckIds === undefined || strings(candidate.verificationCheckIds))
 }
+
+const evidenceKeys = new Set(['id', 'label', 'category', 'state', 'safety', 'explanation', 'source', 'targetId', 'location', 'confidence'])
 
 export function isEvidenceRecord(value: unknown): value is EvidenceRecord {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<EvidenceRecord>
-  return typeof candidate.id === 'string' && candidate.id.length > 0
-    && typeof candidate.label === 'string' && candidate.label.length > 0
-    && typeof candidate.category === 'string'
-    && typeof candidate.explanation === 'string'
-    && ['detected', 'not-detected', 'unknown', 'unsupported', 'protected'].includes(candidate.state ?? '')
-    && ['safe-to-remove', 'editable', 'protected', 'unknown', 'unsupported'].includes(candidate.safety ?? '')
-    && ['local-inspection', 'simulated-fixture', 'boundary-result'].includes(candidate.source ?? '')
-    && ['high', 'medium', 'low', 'unknown'].includes(candidate.confidence ?? '')
+  const keys = Object.keys(value)
+  if (keys.some(key => !evidenceKeys.has(key))) return false
+  if (typeof candidate.id !== 'string' || candidate.id.length === 0 || typeof candidate.label !== 'string' || candidate.label.length === 0 || typeof candidate.category !== 'string' || typeof candidate.explanation !== 'string') return false
+  if (!['detected', 'not-detected', 'unknown', 'unsupported', 'protected'].includes(candidate.state ?? '') || !['safe-to-remove', 'editable', 'protected', 'unknown', 'unsupported'].includes(candidate.safety ?? '') || !['local-inspection', 'simulated-fixture', 'boundary-result'].includes(candidate.source ?? '') || !['high', 'medium', 'low', 'unknown'].includes(candidate.confidence ?? '')) return false
+  if (candidate.state === 'not-detected' && candidate.safety === 'safe-to-remove') return false
+  if (candidate.state === 'unknown' && (candidate.safety === 'safe-to-remove' || candidate.targetId !== undefined)) return false
+  if (candidate.safety === 'safe-to-remove' && (typeof candidate.targetId !== 'string' || candidate.targetId.length === 0)) return false
+  return true
 }
 
 /** A single shared adapter conformance shape for future format implementations. */

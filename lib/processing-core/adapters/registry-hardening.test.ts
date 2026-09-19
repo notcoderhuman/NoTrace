@@ -20,7 +20,7 @@ const IDENTITY: ProcessingIdentity = { formatId: 'check-test', engineId: 'check-
 const DECLARED_CHECKS = ['container-intact', 'target-absent'] as const
 const resource: ResourceContract = { inputBound: { maxBytes: 1024 * 1024, state: 'measured' }, fullBufferOperations: { state: 'inferred' }, streaming: { supported: false, state: 'measured' }, worker: { required: false, state: 'measured' }, transfer: { transferable: false, copies: true, state: 'inferred' }, temporaryAllocations: 'inferred', concurrency: { state: 'unmeasured' }, cancellationPoints: ['input read'] }
 const inspectOk = async () => ({ ok: true as const, value: { kind: 'inspection' as const, status: 'success' as const, input: { filename: 'a.chk' }, format: { state: 'supported' as const }, fields: [], warnings: [], analyzed: true as const } })
-const evidence: () => readonly EvidenceRecord[] = () => []
+const evidence: (result: any) => readonly EvidenceRecord[] = result => result.fields.map((field: any) => ({ id: field.id, label: field.label, category: field.category, state: 'detected', safety: 'safe-to-remove', targetId: field.id, explanation: field.value ?? 'probe', source: 'simulated-fixture', confidence: 'high' }))
 
 function declaration(over: Partial<StaticCapabilityDeclaration> = {}): StaticCapabilityDeclaration {
   return { formatId: 'check-test', operations: ['inspect', 'executeRemoval'], extensions: ['chk'], mimeTypes: [MEDIA], processingIdentity: IDENTITY, verifierCompatibilityKey: 'check-test-v1', verificationCheckIds: [...DECLARED_CHECKS], ...over }
@@ -79,7 +79,7 @@ async function main() {
     const resolved = await registry.resolveVerified(input, 'remove')
     assert.equal(resolved.ok, false, 'mutated adapter must not resolve for destructive work')
 
-    const target: RemovalTarget = { id: 'check-target-0', kind: 'format-target', marker: 0, ordinal: 0, startOffset: 0, endOffset: 4, category: 'comment', scope: 'check-test', classification: 'SAFE_TO_REMOVE', removable: true, reason: 'test' }
+    const target: RemovalTarget = { id: 'check-target-0', kind: 'format-target', marker: 0, ordinal: 0, startOffset: 0, endOffset: 4, formatId: 'check-test', typeId: 'check-target', category: 'comment', scope: { formatId: 'check-test', scopeId: 'check-test' }, classification: 'SAFE_TO_REMOVE', removable: true, reason: 'test' }
     const witness: RemovalWitness = { sourceFingerprint: 'fp', targetId: 'check-target-0', ordinal: 0, startOffset: 0, endOffset: 4, marker: 0, rangeLength: 4 }
     const plan: RemovalPlan = { id: 'plan-1', status: 'ready', identity: IDENTITY, input: input.descriptor, sourceFingerprint: 'fp', targets: [target], removableTargetIds: ['check-target-0'], preservedTargetIds: [], warnings: [], requiresApproval: true, removableFieldIds: [], preservedFieldIds: [], removalWitnesses: [witness] }
     const approval: RemovalApproval = { planId: 'plan-1', inputId: input.descriptor.id, sourceFingerprint: 'fp', identity: IDENTITY, approvedTargetIds: ['check-target-0'], approvedAt: 1 }
@@ -193,6 +193,41 @@ async function main() {
   await test('B3 adapter check ids diverging from its declaration are rejected', () => {
     const registry = createFormatAdapterRegistry()
     assert.equal(registry.register({ ...verifier(), verificationCheckIds: ['made-up'] }).ok, false)
+  })
+  await test('B7 over-claimed executable declarations are rejected', () => {
+    const cases = [
+      { operations: ['inspect', 'edit'] as const },
+      { operations: ['inspect', 'watermarkRemoval'] as const },
+      { operations: ['inspect', 'provenanceWrite'] as const },
+    ]
+    for (const item of cases) assert.equal(createFormatAdapterRegistry().register(transformer({}, item as any)).ok, false)
+    const baseRemoval = transformer({}, { operations: ['inspect', 'executeRemoval'] } as any)
+    const missingRemoval = { ...baseRemoval, remove: undefined, contract: { ...baseRemoval.contract!, executeRemoval: undefined } }
+    assert.equal(createFormatAdapterRegistry().register(missingRemoval).ok, false)
+    const baseVerifier = transformer({}, { operations: ['inspect', 'verifyRemoval'] } as any)
+    const missingVerifier = { ...baseVerifier, verifyOutput: undefined, contract: { ...baseVerifier.contract!, verifyRemoval: undefined } }
+    assert.equal(createFormatAdapterRegistry().register(missingVerifier).ok, false)
+    const base = transformer()
+    const inspectOnly = { ...base, conformance: { ...base.conformance!, level: 'inspect-only' as const }, contract: { ...base.contract!, conformance: { ...base.conformance!, level: 'inspect-only' as const } } }
+    assert.equal(createFormatAdapterRegistry().register(inspectOnly).ok, false)
+  })
+  await test('B7 empty extension and MIME declarations are rejected', () => {
+    assert.equal(createFormatAdapterRegistry().register(transformer({}, { extensions: [] })).ok, false)
+    assert.equal(createFormatAdapterRegistry().register(transformer({}, { mimeTypes: [] })).ok, false)
+  })
+
+  await test('B4 obvious executor/verifier function reuse is rejected', async () => {
+    const registry = createFormatAdapterRegistry()
+    const executor = transformer()
+    const reused = async (..._args: any[]) => ({ ok: false as const, error: { code: 'VERIFICATION_FAILED' as const, message: 'reused' } })
+    const verifierAdapter = verifier()
+    const verifierWithReuse = { ...verifierAdapter, verifyOutput: reused }
+    const executorWithReuse = { ...executor, remove: reused }
+    assert.equal(registry.register(executorWithReuse).ok, true)
+    assert.equal(registry.register(verifierWithReuse).ok, true)
+    const input = createMemoryInput(new Uint8Array([1]), { id: 'b4', filename: 'b4.chk', mimeType: MEDIA })
+    const selected = await registry.resolveVerifiedVerifier(input, executorWithReuse.id, 'check-test-v1')
+    assert.equal(selected.ok, false)
   })
   await test('B3 matching declared and adapter check ids are accepted', () => {
     const registry = createFormatAdapterRegistry()

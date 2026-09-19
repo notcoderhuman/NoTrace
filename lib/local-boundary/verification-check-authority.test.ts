@@ -16,10 +16,10 @@ import type { VerificationCheck } from '../processing-core/domain/result'
 const MEDIA = 'text/x-check-test'
 const IDENTITY: ProcessingIdentity = { formatId: 'check-test', engineId: 'check-test-engine', engineVersion: '1', capabilityKey: 'check-test:remove-target', policyId: 'check-test-policy', policyVersion: '1', verifierCompatibilityKey: 'check-test-v1' }
 const resource: ResourceContract = { inputBound: { maxBytes: 1024 * 1024, state: 'measured' }, fullBufferOperations: { state: 'inferred' }, streaming: { supported: false, state: 'measured' }, worker: { required: false, state: 'measured' }, transfer: { transferable: false, copies: true, state: 'inferred' }, temporaryAllocations: 'inferred', concurrency: { state: 'unmeasured' }, cancellationPoints: ['input read'] }
-const evidence: () => readonly EvidenceRecord[] = () => []
+const evidence = (result: any): readonly EvidenceRecord[] => result.fields.map((field: any) => ({ id: field.id, label: field.label, category: field.category, state: 'detected', safety: 'safe-to-remove', targetId: field.id, explanation: field.value ?? 'probe', source: 'simulated-fixture', confidence: 'high' }))
 const inspectOk = async () => ({ ok: true as const, value: { kind: 'inspection' as const, status: 'success' as const, input: { filename: 'a.chk' }, format: { state: 'supported' as const }, fields: [], warnings: [], analyzed: true as const } })
 
-const TARGET = { id: 'check-target-0', kind: 'format-target' as const, marker: 0, ordinal: 0, startOffset: 0, endOffset: 4, category: 'comment' as const, scope: 'check-test', classification: 'SAFE_TO_REMOVE' as const, removable: true, reason: 'test' }
+const TARGET = { id: 'check-target-0', kind: 'format-target' as const, marker: 0, ordinal: 0, startOffset: 0, endOffset: 4, formatId: 'check-test', typeId: 'check-target', category: 'comment' as const, scope: { formatId: 'check-test', scopeId: 'check-test' }, classification: 'SAFE_TO_REMOVE' as const, removable: true, reason: 'test' }
 const WITNESS = { sourceFingerprint: 'fp', targetId: 'check-target-0', ordinal: 0, startOffset: 0, endOffset: 4, marker: 0, rangeLength: 4 }
 
 function buildRegistry(declared: readonly string[], produceChecks: (declared: readonly string[]) => VerificationCheck[]) {

@@ -1,7 +1,7 @@
 import type { Operation } from '../domain/operation'
 
 /** Phase 1 defaults are fail-closed; real limits must be selected before parsing. */
-export type RemovalScope = 'jpeg-com' | (string & {})
+export type RemovalScope = Readonly<{ formatId: string; scopeId: string }>
 
 export type SafetyPolicy = Readonly<{
   maxInputBytes: number
@@ -35,7 +35,7 @@ export const structuralLimits = Object.freeze({
 export const phaseOneSafetyPolicy: SafetyPolicy = Object.freeze({
   ...structuralLimits,
   allowedOperations: Object.freeze(['inspect', 'remove', 'edit', 'verify'] as Operation[]),
-  allowedRemovalScopes: Object.freeze(['jpeg-com'] as RemovalScope[]),
+  allowedRemovalScopes: Object.freeze([{ formatId: 'jpeg', scopeId: 'jpeg-com' }] as RemovalScope[]),
   allowOutput: true,
   preserveOriginal: true,
   failClosed: true,

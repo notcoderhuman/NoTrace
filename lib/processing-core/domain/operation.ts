@@ -15,14 +15,16 @@ export type RemovalTargetCategory = 'comment' | 'xmp' | 'exif' | 'icc' | 'unknow
 
 export type RemovalTarget = Readonly<{
   id: string
+  formatId?: string
   kind: 'jpeg-segment' | 'format-target'
+  typeId?: string
   marker: number
   ordinal: number
   startOffset: number
   endOffset: number
   category: RemovalTargetCategory
-  /** Adapter-owned scope interpreted by central policy; absent scopes are never authorized. */
-  scope?: string
+  /** NoTrace policy identity; arbitrary adapter strings are not authoritative. */
+  scope?: Readonly<{ formatId: string; scopeId: string }>
   classification: SafetyClassification
   removable: boolean
   reason: string

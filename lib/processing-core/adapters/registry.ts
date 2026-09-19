@@ -162,8 +162,9 @@ function hasValidEvidence(adapter: FormatAdapter): boolean {
   if (!declaration || !declaration.operations.includes('inspect')) return true
   if (typeof adapter.evidence !== 'function' && typeof adapter.contract?.evidence !== 'function') return false
   try {
-    const records = adapter.evidence?.({ kind: 'inspection', status: 'success', input: { filename: 'contract-probe' }, format: { state: 'unknown' }, fields: [], warnings: [], analyzed: true } as InspectionResult) ?? adapter.contract?.evidence?.({ kind: 'inspection', status: 'success', input: { filename: 'contract-probe' }, format: { state: 'unknown' }, fields: [], warnings: [], analyzed: true } as InspectionResult) ?? []
-    return Array.isArray(records) && records.every(isEvidenceRecord)
+    const probe = { kind: 'inspection' as const, status: 'success' as const, input: { filename: 'contract-probe' }, format: { state: 'unknown' as const }, fields: [{ id: 'probe-target-0', label: 'Probe target', category: 'other' as const, classification: 'SAFE_TO_REMOVE' as const, value: 'present' }], warnings: [], analyzed: true as const }
+    const records = adapter.evidence?.(probe) ?? adapter.contract?.evidence?.(probe) ?? []
+    return Array.isArray(records) && records.length > 0 && records.every(isEvidenceRecord)
   } catch { return false }
 }
 
@@ -176,7 +177,15 @@ function validContract(adapter: FormatAdapter): boolean {
   if (!declaration.extensions.every(value => adapter.capability.extensions.includes(value)) || !declaration.mimeTypes.every(value => adapter.capability.mimeTypes.includes(value))) return false
   const exposed = adapter.capability.operations.map(operation => contractOperationFor[operation]).filter(Boolean) as FormatOperation[]
   if (!exposed.every(operation => declaration.operations.includes(operation))) return false
+  if (isDestructive(adapter) && conformance.level === 'inspect-only') return false
   if (!validDeclaredCheckIds(declaration)) return false
+  const actual = new Set<FormatOperation>()
+  if (typeof adapter.inspect === 'function' || typeof contract.inspect === 'function') actual.add('inspect')
+  if (typeof adapter.planRemoval === 'function' || typeof contract.planRemoval === 'function') actual.add('planRemoval')
+  if (typeof adapter.remove === 'function' || typeof contract.executeRemoval === 'function') actual.add('executeRemoval')
+  if (typeof adapter.verifyOutput === 'function' || typeof contract.verifyRemoval === 'function') actual.add('verifyRemoval')
+  const executable = declaration.operations.filter(operation => ['inspect', 'planRemoval', 'executeRemoval', 'verifyRemoval', 'edit', 'provenanceRead', 'provenanceWrite', 'watermarkAnalysis', 'watermarkRemoval'].includes(operation))
+  if (!executable.every(operation => actual.has(operation))) return false
   if (declaration.verificationCheckIds && adapter.verificationCheckIds && !sameStringSet(adapter.verificationCheckIds, declaration.verificationCheckIds)) return false
   if (declaration.operations.includes('inspect') && typeof contract.inspect !== 'function' && typeof adapter.inspect !== 'function' && !adapter.planRemoval) return false
   if (declaration.operations.includes('planRemoval') && typeof contract.planRemoval !== 'function' && typeof adapter.planRemoval !== 'function') return false
@@ -252,7 +261,7 @@ export function createFormatAdapterRegistry(): FormatAdapterRegistry {
       if (!compatibilityKey || !compatibilityKey.trim()) return { ok: false, error: { code: 'UNSUPPORTED', message: 'A verifier compatibility key is required for destructive execution.' } }
       const executor = adapters.find(candidate => candidate.id === executorId)
       if (!executor || executor.role !== 'transformer' || !executor.verifierCompatibilityKey || executor.verifierCompatibilityKey !== compatibilityKey) return { ok: false, error: { code: 'UNSUPPORTED', message: 'The destructive executor is not a compatible transformer.' } }
-      const candidates = adapters.filter(candidate => candidate.capability.operations.includes('verify') && candidate.role === 'verifier' && validContract(candidate) && candidate.contract?.conformance.independentVerifier === true && typeof candidate.verifyOutput === 'function' && candidate.id !== executorId && candidate.verifierIndependence === 'structural-independent' && typeof candidate.probe === 'function' && typeof candidate.formatId === 'string' && candidate.formatId.trim() && candidate.verifierCompatibilityKey === compatibilityKey)
+      const candidates = adapters.filter(candidate => candidate.capability.operations.includes('verify') && candidate.role === 'verifier' && validContract(candidate) && candidate.contract?.conformance.independentVerifier === true && typeof candidate.verifyOutput === 'function' && candidate.id !== executorId && candidate.verifierIndependence === 'structural-independent' && typeof candidate.probe === 'function' && typeof candidate.formatId === 'string' && candidate.formatId.trim() && candidate.verifierCompatibilityKey === compatibilityKey && (candidate.verifyOutput as unknown) !== (executor.remove as unknown) && (candidate.verifyOutput as unknown) !== (executor.contract?.executeRemoval as unknown))
       if (!candidates.length) return { ok: false, error: { code: 'UNSUPPORTED', message: 'No content-verified independent verifier is registered.' } }
       const matched: FormatAdapter[] = []
       for (const candidate of candidates) {
