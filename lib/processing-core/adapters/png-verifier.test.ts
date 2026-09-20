@@ -17,6 +17,8 @@ async function main() {
   const forged = await verifyPngOutputIndependently(input, execution.value.output.artifact, { ...plan, sourceFingerprint: 'forged' }, { ...approval, sourceFingerprint: 'forged' }); assert.equal(forged.ok, false)
   const altered = createMemoryArtifact(new Uint8Array([...fixture]), 'altered.png', 'image/png')
   const alteredResult = await verifyPngOutputIndependently(input, altered, plan, approval); assert.equal(alteredResult.ok, false)
-  console.log('PNG independent verifier tests passed: 3')
+  const forgedWitness = { ...plan.removalWitnesses[0], startOffset: plan.removalWitnesses[0].startOffset + 1 }; const forgedPlan = { ...plan, removalWitnesses: [forgedWitness] }; const forgedWitnessResult = await verifyPngOutputIndependently(input, execution.value.output.artifact, forgedPlan, approval); assert.equal(forgedWitnessResult.ok, false)
+  const partialPlan = await planPngRemoval(input, ['png-tEXt-0', 'png-tEXt-1'], 'png-text'); assert.equal(partialPlan.ok, true); if (!partialPlan.ok) return; const partialApproval = { ...approval, planId: partialPlan.value.id, sourceFingerprint: partialPlan.value.sourceFingerprint, approvedTargetIds: ['png-tEXt-0'], identity: partialPlan.value.identity }; const partialExecution = await executePngRemoval(input, partialPlan.value, partialApproval); assert.equal(partialExecution.ok, true)
+  console.log('PNG independent verifier tests passed: 5')
 }
 void main()

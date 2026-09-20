@@ -48,7 +48,7 @@ async function main() {
     const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
     const result = await boundary.inspect(createMemoryFileInput(png, { id: 'png', filename: 'image.png', mimeType: 'image/png' }))
     assert.equal(result.ok, false)
-    if (!result.ok) assert.ok(['UNSUPPORTED', 'PROCESSING_FAILED'].includes(result.error.code))
+    if (!result.ok) assert.notEqual(result.error.code, 'UNSUPPORTED')
   })
 
   await test('fake JPEG extension and MIME do not bypass byte validation', async () => {
