@@ -12,10 +12,12 @@ export interface OutputArtifact {
 }
 
 const disposedArtifacts = new WeakSet<object>()
+const attemptedDisposals = new WeakSet<object>()
 
 export function disposeArtifact(artifact: OutputArtifact | undefined): BoundaryResult<void> {
   if (!artifact) return { ok: true, value: undefined }
-  if (disposedArtifacts.has(artifact)) return { ok: true, value: undefined }
+  if (disposedArtifacts.has(artifact) || attemptedDisposals.has(artifact)) return { ok: true, value: undefined }
+  attemptedDisposals.add(artifact)
   try {
     artifact.dispose()
     disposedArtifacts.add(artifact)

@@ -30,10 +30,18 @@ export type RemovalTarget = Readonly<{
   reason: string
 }>
 
+export type TargetIdentity = Readonly<{
+  formatId: string
+  typeId: string
+  ordinal: number
+  startOffset: number
+  endOffset: number
+}>
+
 export type RemovalWitness = Readonly<{
   sourceFingerprint: string
   targetId: string
-  typeId?: string
+  identity: TargetIdentity
   ordinal: number
   startOffset: number
   endOffset: number

@@ -5,6 +5,7 @@ import type { ContentProbe } from '../domain/probe'
 import type { LocalInput } from '../domain/input'
 import type { InspectionResult } from '../domain/metadata'
 import type { ProcessingResult, RemovalPlan } from '../domain/operation'
+import { sameProcessingIdentity } from '../domain/identity'
 import { isStaticCapabilityDeclaration, isEvidenceRecord, type AdapterContract, type AdapterConformance, type EvidenceRecord, type FormatOperation, type StaticCapabilityDeclaration, type ResourceContract } from '../domain/contracts'
 
 export type AdapterCapability = Readonly<{
@@ -168,12 +169,14 @@ function hasValidEvidence(adapter: FormatAdapter): boolean {
   } catch { return false }
 }
 
+function adapterProcessingIdentity(adapter: FormatAdapter) { const declaration = adapter.contract?.conformance.declaration; return declaration?.processingIdentity ?? (adapter.formatId && adapter.engineId && adapter.engineVersion && adapter.capabilityKey && adapter.verifierCompatibilityKey ? { formatId: adapter.formatId, engineId: adapter.engineId, engineVersion: adapter.engineVersion, capabilityKey: adapter.capabilityKey, policyId: '', policyVersion: '', verifierCompatibilityKey: adapter.verifierCompatibilityKey } : undefined) }
+
 function validContract(adapter: FormatAdapter): boolean {
   const contract = adapter.contract
   const conformance = contract?.conformance
   const declaration = conformance?.declaration
   if (!contract || !conformance || !isStaticCapabilityDeclaration(declaration) || !hasValidEvidence(adapter)) return false
-  if (declaration.formatId !== adapter.formatId || (declaration.verifierCompatibilityKey ?? '') !== (adapter.verifierCompatibilityKey ?? '')) return false
+  if (declaration.formatId !== adapter.formatId || (declaration.verifierCompatibilityKey ?? '') !== (adapter.verifierCompatibilityKey ?? '') || Boolean(declaration.processingIdentity && !adapterProcessingIdentity(adapter)) || Boolean(declaration.processingIdentity && adapterProcessingIdentity(adapter) && declaration.processingIdentity.formatId !== adapterProcessingIdentity(adapter)?.formatId) || Boolean(declaration.processingIdentity && (declaration.processingIdentity.engineId !== adapter.engineId || declaration.processingIdentity.engineVersion !== adapter.engineVersion))) return false
   if (!declaration.extensions.every(value => adapter.capability.extensions.includes(value)) || !declaration.mimeTypes.every(value => adapter.capability.mimeTypes.includes(value))) return false
   const exposed = adapter.capability.operations.map(operation => contractOperationFor[operation]).filter(Boolean) as FormatOperation[]
   if (!exposed.every(operation => declaration.operations.includes(operation))) return false

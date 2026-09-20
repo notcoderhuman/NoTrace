@@ -51,7 +51,7 @@ export function createTestTextAdapters(): { transformer: FormatAdapter; verifier
       const t = target(read.value)
       const selected = ids.length === 0 ? [t.id] : ids
       const chosen = selected.includes(t.id) ? [t.id] : []
-      const plan: RemovalPlan = { id: `plan-${input.descriptor.id}`, status: chosen.length ? 'ready' : 'unsupported', identity: IDENTITY, input: input.descriptor, sourceFingerprint, targets: [t], removableTargetIds: chosen, preservedTargetIds: chosen.length ? [] : [t.id], warnings: [], requiresApproval: true, removableFieldIds: [], preservedFieldIds: [], removalWitnesses: chosen.length ? [{ sourceFingerprint, targetId: t.id, ordinal: t.ordinal, startOffset: t.startOffset, endOffset: t.endOffset, marker: t.marker, rangeLength: t.endOffset - t.startOffset }] : [] }
+      const plan: RemovalPlan = { id: `plan-${input.descriptor.id}`, status: chosen.length ? 'ready' : 'unsupported', identity: IDENTITY, input: input.descriptor, sourceFingerprint, targets: [t], removableTargetIds: chosen, preservedTargetIds: chosen.length ? [] : [t.id], warnings: [], requiresApproval: true, removableFieldIds: [], preservedFieldIds: [], removalWitnesses: chosen.length ? [{ sourceFingerprint, targetId: t.id, identity: { formatId: FORMAT, typeId: t.typeId ?? 'test-text-marker', ordinal: t.ordinal, startOffset: t.startOffset, endOffset: t.endOffset }, ordinal: t.ordinal, startOffset: t.startOffset, endOffset: t.endOffset, marker: t.marker, rangeLength: t.endOffset - t.startOffset }] : [] }
       return { ok: true, value: plan }
     },
     remove: async (input, plan, approval) => {

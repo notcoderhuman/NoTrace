@@ -9,7 +9,7 @@ import { scanPngForVerification, type VerifierPngChunk } from './png-verifier-sc
 
 function same(a: Uint8Array, b: Uint8Array, signal?: AbortSignal): boolean { for (let i = 0; i < a.length; i++) { if (signal?.aborted) return false; if (a[i] !== b[i]) return false } return a.length === b.length }
 function fail(message: string): BoundaryResult<never> { return { ok: false, error: { code: 'VERIFICATION_FAILED', message } } }
-function witnessFor(chunk: VerifierPngChunk, fingerprint: string): RemovalWitness { return { sourceFingerprint: fingerprint, targetId: chunk.id, typeId: chunk.type, ordinal: chunk.ordinal, startOffset: chunk.startOffset, endOffset: chunk.endOffset, marker: 0, rangeLength: chunk.endOffset - chunk.startOffset } }
+function witnessFor(chunk: VerifierPngChunk, fingerprint: string): RemovalWitness { return { sourceFingerprint: fingerprint, targetId: chunk.id, identity: { formatId: 'png', typeId: chunk.type, ordinal: chunk.ordinal, startOffset: chunk.startOffset, endOffset: chunk.endOffset }, ordinal: chunk.ordinal, startOffset: chunk.startOffset, endOffset: chunk.endOffset, marker: 0, rangeLength: chunk.endOffset - chunk.startOffset } }
 export async function verifyPngOutputIndependently(input: LocalInput, output: OutputArtifact, plan: RemovalPlan, approval: RemovalApproval, signal?: AbortSignal): Promise<BoundaryResult<VerificationResult>> {
   const sourceRead = await input.read(undefined, signal); if (!sourceRead.ok) return sourceRead
   const sourceAgain = await input.read(undefined, signal); if (!sourceAgain.ok) return sourceAgain

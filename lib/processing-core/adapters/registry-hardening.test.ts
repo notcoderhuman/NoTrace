@@ -33,7 +33,7 @@ function transformer(over: Partial<FormatAdapter> = {}, declOver: Partial<Static
   const conf = conformance(decl)
   const contract: AdapterContract = { conformance: conf, evidence, inspect: inspectOk, executeRemoval: async () => ({ ok: false as const, error: { code: 'PROCESSING_FAILED' as const, message: 'not called' } }) }
   return {
-    id: 'check-test-transformer', role: 'transformer', formatId: 'check-test', verifierCompatibilityKey: 'check-test-v1', verificationCheckIds: DECLARED_CHECKS,
+    id: 'check-test-transformer', role: 'transformer', formatId: 'check-test', engineId: IDENTITY.engineId, engineVersion: IDENTITY.engineVersion, capabilityKey: IDENTITY.capabilityKey, verifierCompatibilityKey: 'check-test-v1', verificationCheckIds: DECLARED_CHECKS,
     probe: async () => ({ ok: true as const, value: { formatId: 'check-test', mediaType: MEDIA, confidence: 'structural' as const } }),
     capability: { extensions: ['chk'], mimeTypes: [MEDIA], operations: ['inspect', 'remove'] },
     evidence, inspect: inspectOk, conformance: conf, contract,
@@ -45,7 +45,7 @@ function verifier(declOver: Partial<StaticCapabilityDeclaration> = {}): FormatAd
   const decl = declaration({ operations: ['verifyRemoval'], verificationCheckIds: DECLARED_CHECKS, ...declOver })
   const conf = conformance(decl, { level: 'verification-capable', independentVerifier: true })
   return {
-    id: 'check-test-verifier', role: 'verifier', formatId: 'check-test', verifierCompatibilityKey: 'check-test-v1', verifierIndependence: 'structural-independent', verificationCheckIds: DECLARED_CHECKS,
+    id: 'check-test-verifier', role: 'verifier', formatId: 'check-test', engineId: IDENTITY.engineId, engineVersion: IDENTITY.engineVersion, capabilityKey: IDENTITY.capabilityKey, verifierCompatibilityKey: 'check-test-v1', verifierIndependence: 'structural-independent', verificationCheckIds: DECLARED_CHECKS,
     probe: async () => ({ ok: true as const, value: { formatId: 'check-test', mediaType: MEDIA, confidence: 'structural' as const } }),
     capability: { extensions: ['chk'], mimeTypes: [MEDIA], operations: ['verify'] },
     conformance: conf, contract: { conformance: conf },
@@ -80,7 +80,7 @@ async function main() {
     assert.equal(resolved.ok, false, 'mutated adapter must not resolve for destructive work')
 
     const target: RemovalTarget = { id: 'check-target-0', kind: 'format-target', marker: 0, ordinal: 0, startOffset: 0, endOffset: 4, formatId: 'check-test', typeId: 'check-target', category: 'comment', scope: { formatId: 'check-test', scopeId: 'check-test' }, classification: 'SAFE_TO_REMOVE', removable: true, reason: 'test' }
-    const witness: RemovalWitness = { sourceFingerprint: 'fp', targetId: 'check-target-0', ordinal: 0, startOffset: 0, endOffset: 4, marker: 0, rangeLength: 4 }
+    const witness: RemovalWitness = { sourceFingerprint: 'fp', targetId: 'check-target-0', identity: { formatId: 'check-test', typeId: 'check-target', ordinal: 0, startOffset: 0, endOffset: 4 }, ordinal: 0, startOffset: 0, endOffset: 4, marker: 0, rangeLength: 4 }
     const plan: RemovalPlan = { id: 'plan-1', status: 'ready', identity: IDENTITY, input: input.descriptor, sourceFingerprint: 'fp', targets: [target], removableTargetIds: ['check-target-0'], preservedTargetIds: [], warnings: [], requiresApproval: true, removableFieldIds: [], preservedFieldIds: [], removalWitnesses: [witness] }
     const approval: RemovalApproval = { planId: 'plan-1', inputId: input.descriptor.id, sourceFingerprint: 'fp', identity: IDENTITY, approvedTargetIds: ['check-target-0'], approvedAt: 1 }
     const executed = await createProcessingBoundary(registry).execute({ operation: 'remove', input, plan, approval })

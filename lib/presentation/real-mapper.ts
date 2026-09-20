@@ -3,6 +3,7 @@ import type { RemovalPlan, ProcessingResult } from '../processing-core/domain/op
 import type { VerificationResult } from '../processing-core/domain/result'
 import type { ProgressViewModel, ReportViewModel, RiskAssessmentViewModel, UnifiedFileViewModel, UnifiedMetadataViewModel, PrivacyFindingViewModel, RemovalViewModel, VerificationViewModel } from './models'
 import { scoreRisk, type RiskEvidence } from './risk-scoring'
+import { sameProcessingIdentity } from '../processing-core/domain/identity'
 
 const categoryLabel: Record<string, string> = { EXIF: 'EXIF', IPTC: 'IPTC', XMP: 'XMP', C2PA: 'C2PA', container: 'Container', other: 'Other' }
 function metadataClass(value: string): UnifiedMetadataViewModel['classification'] { return value === 'SAFE_TO_REMOVE' || value === 'EDITABLE' ? 'removable' : value === 'PROTECTED' ? 'protected' : value === 'UNSUPPORTED' ? 'unsupported' : value === 'UNKNOWN' ? 'unknown' : 'safe' }
@@ -57,7 +58,7 @@ export function mapRealRemoval(plan: RemovalPlan, selectedTargetIds: readonly st
 export function mapRealVerification(result?: VerificationResult, expected?: Readonly<{ sourceFingerprint: string; identity: VerificationResult['identity'] }>): VerificationViewModel {
   if (!result) return { state: 'not-run', checks: [], sourceBinding: 'unknown', identityBinding: 'unknown', preservedItems: [], removedItems: [], warnings: [], provenance: 'real' }
   const sourceMatched = Boolean(expected && result.sourceFingerprint === expected.sourceFingerprint)
-  const identityMatched = Boolean(expected && JSON.stringify(result.identity) === JSON.stringify(expected.identity))
+  const identityMatched = Boolean(expected && sameProcessingIdentity(result.identity, expected.identity))
   const authoritative = result.status === 'success' && sourceMatched && identityMatched
   return { state: authoritative ? 'passed' : result.status === 'failed' ? 'failed' : 'not-run', checks: result.checks.map(check => ({ id: check.id, label: check.name, state: check.status === 'passed' ? 'passed' : check.status === 'failed' ? 'failed' : 'not-run' })), sourceBinding: sourceMatched ? 'matched' : 'unknown', identityBinding: identityMatched ? 'matched' : 'unknown', preservedItems: result.preservedTargetIds, removedItems: result.removedTargetIds, warnings: result.warnings, provenance: 'real' }
 }

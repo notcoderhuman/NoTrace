@@ -68,11 +68,11 @@ export function createProcessingBoundary(registry: FormatAdapterRegistry): Local
       if (!('operation' in request) || request.operation !== 'remove' || !request.plan || !request.approval || !validateRemovalApproval(request.approval, request.plan) || request.plan.input.id !== request.input.descriptor.id || request.plan.input.filename !== request.input.descriptor.filename) return { ok: false, error: { code: 'INVALID_INPUT', message: 'A valid approved removal plan is required.' } }
       if (options?.signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Removal was cancelled.' } }
       const adapter = await registry.resolveVerified(request.input, 'remove', options?.signal)
-      if (!adapter.ok || !adapter.value.remove) return { ok: false, error: { code: 'UNSUPPORTED', message: 'No verified removal execution adapter is available for this input.' } }
+      if (!adapter.ok || !adapter.value.remove || !sameProcessingIdentity(adapter.value.contract?.conformance.declaration.processingIdentity, request.plan.identity)) return { ok: false, error: { code: 'UNSUPPORTED', message: 'No identity-bound removal execution adapter is available for this plan.' } }
       let execution: BoundaryResult<ProcessingResult>
       try { execution = await adapter.value.remove(request.input, request.plan, request.approval, options?.signal) } catch (error) { disposeObserved(error); return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Local processing could not be completed.' } } }
       if (!execution.ok) { disposeObserved(execution); return execution }
-      if (!execution.value.output) return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Processing did not create an output artifact.' } }
+      if (!execution.value.output) { disposeObserved(execution); return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Processing did not create an output artifact.' } } }
       const executionArtifact = execution.value.output.artifact
       let replacement: OutputArtifact | undefined
       const disposed = new Set<OutputArtifact>()

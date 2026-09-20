@@ -17,9 +17,11 @@ async function main() {
   const cleanup = disposeArtifact(throwing)
   assert.equal(cleanup.ok, false)
   assert.equal(disposals, 1)
+  assert.equal(disposeArtifact(throwing).ok, true)
+  assert.equal(disposals, 1)
   const owned: OwnedArtifact = { artifact, state: 'CREATED' }
   assert.equal(transitionOwnedArtifact(owned, 'PROVIDER_OWNED').ok, false)
   assert.equal(transitionOwnedArtifact(owned, 'EXECUTION_OWNED').ok, true)
-  console.log('Artifact lifecycle tests passed: 3')
+  console.log('Artifact lifecycle tests passed: 4')
 }
 void main()
