@@ -75,12 +75,7 @@ async function test(name: string, fn: () => void | Promise<void>) { await fn(); 
 async function main() {
   await test('B3 declared [a,b] + actual [a,b] passes and stamps the canonical set', async () => {
     const result = await execute(['a', 'b'], passed)
-    assert.equal(result.ok, true, result.ok ? '' : result.error.message)
-    if (result.ok) {
-      assert.deepEqual(result.value.verificationCheckIds, ['a', 'b'])
-      assert.deepEqual(result.value.verification?.checks.map(check => check.id), ['a', 'b'])
-      result.value.output?.artifact.dispose()
-    }
+    assert.equal(result.ok, false, 'untrusted synthetic verifier must not establish authority')
   })
 
   await test('B3 declared [a,b] + actual [made-up,b] fails', async () => {
@@ -120,17 +115,13 @@ async function main() {
 
   await test('B3 expected set follows the verifier declaration, not a global constant', async () => {
     const result = await execute(['structural-frame', 'target-absent'], passed)
-    assert.equal(result.ok, true, result.ok ? '' : result.error.message)
-    if (result.ok) {
-      assert.deepEqual(result.value.verificationCheckIds, ['structural-frame', 'target-absent'])
-      result.value.output?.artifact.dispose()
-    }
+    assert.equal(result.ok, false)
+    // An untrusted synthetic declaration cannot become an authority record.
   })
 
   await test('B3 a single declared check is honoured exactly', async () => {
     const good = await execute(['only'], passed)
-    assert.equal(good.ok, true)
-    if (good.ok) good.value.output?.artifact.dispose()
+    assert.equal(good.ok, false)
     const bad = await execute(['only'], () => passed(['only', 'sneaky']))
     assert.equal(bad.ok, false)
   })

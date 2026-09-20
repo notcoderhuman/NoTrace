@@ -95,7 +95,7 @@ async function main() {
   assert.equal(planResult.ok, true); if (!planResult.ok) return
   const approval = { planId: planResult.value.id, inputId: input.descriptor.id, sourceFingerprint: planResult.value.sourceFingerprint, identity: planResult.value.identity, approvedTargetIds: ['test-text-marker-0'], approvedAt: 1 }
   const result = await boundary.execute({ operation: 'remove', input, plan: planResult.value, approval })
-  assert.equal(result.ok, true); if (result.ok) { assert.equal(result.value.outputVerification, 'passed'); result.value.output?.artifact.dispose() }
+  assert.equal(result.ok, false, 'unapproved test verifier must not establish production verification authority')
   const production = createDefaultFormatAdapterRegistry()
   assert.equal(production.list().some(adapter => adapter.formatId === FORMAT), false)
   assert.equal(production.resolve({ id: 'x', filename: 'x.ntxt', mimeType: MEDIA, source: 'memory', size: fixture.length }, 'remove').ok, false)

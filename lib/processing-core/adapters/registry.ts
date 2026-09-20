@@ -5,7 +5,10 @@ import type { ContentProbe } from '../domain/probe'
 import type { LocalInput } from '../domain/input'
 import type { InspectionResult } from '../domain/metadata'
 import type { ProcessingResult, RemovalPlan } from '../domain/operation'
-import { sameProcessingIdentity } from '../domain/identity'
+import { sameProcessingIdentity, type ProcessingIdentity } from '../domain/identity'
+import { JPEG_PROCESSING_IDENTITY } from '../domain/identity'
+import { JPEG_VERIFICATION_CHECK_IDS } from '../domain/result'
+import { PNG_PROCESSING_IDENTITY, PNG_VERIFICATION_CHECK_IDS } from './png'
 import { isStaticCapabilityDeclaration, isEvidenceRecord, type AdapterContract, type AdapterConformance, type EvidenceRecord, type FormatOperation, type StaticCapabilityDeclaration, type ResourceContract } from '../domain/contracts'
 
 export type AdapterCapability = Readonly<{
@@ -51,6 +54,17 @@ export interface FormatAdapterRegistry {
 
 const destructiveOperations = new Set<Operation>(['remove'])
 const contractOperationFor: Partial<Record<Operation, FormatOperation>> = { inspect: 'inspect', remove: 'executeRemoval', verify: 'verifyRemoval' }
+
+type ApprovedVerifierAuthority = Readonly<{ adapterId: string; formatId: string; compatibilityKey: string; identity: ProcessingIdentity; checkIds: readonly string[] }>
+const approvedVerifierAuthorities: readonly ApprovedVerifierAuthority[] = Object.freeze([
+  { adapterId: 'jpeg-verifier', formatId: 'jpeg', compatibilityKey: JPEG_PROCESSING_IDENTITY.verifierCompatibilityKey, identity: JPEG_PROCESSING_IDENTITY, checkIds: JPEG_VERIFICATION_CHECK_IDS },
+  { adapterId: 'png-verifier', formatId: 'png', compatibilityKey: PNG_PROCESSING_IDENTITY.verifierCompatibilityKey, identity: PNG_PROCESSING_IDENTITY, checkIds: PNG_VERIFICATION_CHECK_IDS },
+])
+function resourceAllowsInput(adapter: FormatAdapter, input: LocalInput): boolean { const max = adapter.contract?.conformance.resource.inputBound.maxBytes; return max === undefined || (Number.isSafeInteger(max) && max > 0 && (input.descriptor.size === undefined || input.descriptor.size <= max)) }
+function approvedVerifier(adapter: FormatAdapter): ApprovedVerifierAuthority | undefined {
+  const declaration = adapter.contract?.conformance.declaration
+  return approvedVerifierAuthorities.find(authority => authority.adapterId === adapter.id && authority.formatId === adapter.formatId && authority.compatibilityKey === adapter.verifierCompatibilityKey && declaration?.formatId === authority.formatId && declaration.verifierCompatibilityKey === authority.compatibilityKey && sameProcessingIdentity(declaration.processingIdentity, authority.identity) && sameStringSet(declaration.verificationCheckIds ?? [], authority.checkIds))
+}
 
 function frozenList<T>(values: readonly T[]): readonly T[] {
   return Object.freeze([...values])
@@ -176,7 +190,9 @@ function validContract(adapter: FormatAdapter): boolean {
   const conformance = contract?.conformance
   const declaration = conformance?.declaration
   if (!contract || !conformance || !isStaticCapabilityDeclaration(declaration) || !hasValidEvidence(adapter)) return false
-  if (declaration.formatId !== adapter.formatId || (declaration.verifierCompatibilityKey ?? '') !== (adapter.verifierCompatibilityKey ?? '') || Boolean(declaration.processingIdentity && !adapterProcessingIdentity(adapter)) || Boolean(declaration.processingIdentity && adapterProcessingIdentity(adapter) && declaration.processingIdentity.formatId !== adapterProcessingIdentity(adapter)?.formatId) || Boolean(declaration.processingIdentity && (declaration.processingIdentity.engineId !== adapter.engineId || declaration.processingIdentity.engineVersion !== adapter.engineVersion))) return false
+  const resource = conformance.resource
+  if (!Number.isSafeInteger(resource.inputBound.maxBytes) || resource.inputBound.maxBytes <= 0) return false
+  if (declaration.formatId !== adapter.formatId || (declaration.verifierCompatibilityKey ?? '') !== (adapter.verifierCompatibilityKey ?? '') || Boolean(declaration.processingIdentity && !adapterProcessingIdentity(adapter)) || Boolean(declaration.processingIdentity && adapterProcessingIdentity(adapter) && declaration.processingIdentity.formatId !== adapterProcessingIdentity(adapter)?.formatId) || Boolean(declaration.processingIdentity && ((adapter.engineId !== undefined && declaration.processingIdentity.engineId !== adapter.engineId) || (adapter.engineVersion !== undefined && declaration.processingIdentity.engineVersion !== adapter.engineVersion)))) return false
   if (!declaration.extensions.every(value => adapter.capability.extensions.includes(value)) || !declaration.mimeTypes.every(value => adapter.capability.mimeTypes.includes(value))) return false
   const exposed = adapter.capability.operations.map(operation => contractOperationFor[operation]).filter(Boolean) as FormatOperation[]
   if (!exposed.every(operation => declaration.operations.includes(operation))) return false
@@ -230,7 +246,7 @@ export function createFormatAdapterRegistry(): FormatAdapterRegistry {
     },
     async resolveVerified(input, operation, signal) {
       const destructive = destructiveOperations.has(operation)
-      const candidates = adapters.filter(candidate => candidate.capability.operations.includes(operation)
+      const candidates = adapters.filter(candidate => resourceAllowsInput(candidate, input) && candidate.capability.operations.includes(operation)
         && typeof candidate.probe === 'function'
         && typeof candidate.formatId === 'string' && candidate.formatId.trim()
         && (!destructive || (candidate.role === 'transformer' && validContract(candidate) && typeof candidate.verifierCompatibilityKey === 'string' && candidate.verifierCompatibilityKey.trim().length > 0)))
@@ -264,7 +280,7 @@ export function createFormatAdapterRegistry(): FormatAdapterRegistry {
       if (!compatibilityKey || !compatibilityKey.trim()) return { ok: false, error: { code: 'UNSUPPORTED', message: 'A verifier compatibility key is required for destructive execution.' } }
       const executor = adapters.find(candidate => candidate.id === executorId)
       if (!executor || executor.role !== 'transformer' || !executor.verifierCompatibilityKey || executor.verifierCompatibilityKey !== compatibilityKey) return { ok: false, error: { code: 'UNSUPPORTED', message: 'The destructive executor is not a compatible transformer.' } }
-      const candidates = adapters.filter(candidate => candidate.capability.operations.includes('verify') && candidate.role === 'verifier' && validContract(candidate) && candidate.contract?.conformance.independentVerifier === true && typeof candidate.verifyOutput === 'function' && candidate.id !== executorId && candidate.verifierIndependence === 'structural-independent' && typeof candidate.probe === 'function' && typeof candidate.formatId === 'string' && candidate.formatId.trim() && candidate.verifierCompatibilityKey === compatibilityKey && (candidate.verifyOutput as unknown) !== (executor.remove as unknown) && (candidate.verifyOutput as unknown) !== (executor.contract?.executeRemoval as unknown))
+      const candidates = adapters.filter(candidate => candidate.capability.operations.includes('verify') && approvedVerifier(candidate)?.identity && sameProcessingIdentity(approvedVerifier(candidate)?.identity, adapterProcessingIdentity(executor)) && candidate.role === 'verifier' && validContract(candidate) && candidate.contract?.conformance.independentVerifier === true && typeof candidate.verifyOutput === 'function' && candidate.id !== executorId && candidate.verifierIndependence === 'structural-independent' && approvedVerifier(candidate) !== undefined && typeof candidate.probe === 'function' && typeof candidate.formatId === 'string' && candidate.formatId.trim() && candidate.verifierCompatibilityKey === compatibilityKey && (candidate.verifyOutput as unknown) !== (executor.remove as unknown) && (candidate.verifyOutput as unknown) !== (executor.contract?.executeRemoval as unknown))
       if (!candidates.length) return { ok: false, error: { code: 'UNSUPPORTED', message: 'No content-verified independent verifier is registered.' } }
       const matched: FormatAdapter[] = []
       for (const candidate of candidates) {
