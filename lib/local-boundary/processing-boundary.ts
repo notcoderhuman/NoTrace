@@ -68,12 +68,12 @@ export function createProcessingBoundary(registry: FormatAdapterRegistry): Local
       if (!('operation' in request) || request.operation !== 'remove' || !request.plan || !request.approval || !validateRemovalApproval(request.approval, request.plan) || request.plan.input.id !== request.input.descriptor.id || request.plan.input.filename !== request.input.descriptor.filename) return { ok: false, error: { code: 'INVALID_INPUT', message: 'A valid approved removal plan is required.' } }
       if (options?.signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Removal was cancelled.' } }
       const adapter = await registry.resolveVerified(request.input, 'remove', options?.signal)
-      if (!adapter.ok || !adapter.value.remove || !sameProcessingIdentity(adapter.value.contract?.conformance.declaration.processingIdentity, request.plan.identity)) return { ok: false, error: { code: 'UNSUPPORTED', message: 'No identity-bound removal execution adapter is available for this plan.' } }
+      if (!adapter.ok) return adapter.error.code === 'CANCELLED' ? adapter : { ok: false, error: { code: 'UNSUPPORTED', message: 'No identity-bound removal execution adapter is available for this plan.' } }
+       if (!adapter.value.remove || !sameProcessingIdentity(adapter.value.contract?.conformance.declaration.processingIdentity, request.plan.identity)) return { ok: false, error: { code: 'UNSUPPORTED', message: 'No identity-bound removal execution adapter is available for this plan.' } }
       let execution: BoundaryResult<ProcessingResult>
       try { execution = await adapter.value.remove(request.input, request.plan, request.approval, options?.signal) } catch (error) { disposeObserved(error); return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Local processing could not be completed.' } } }
       if (!execution.ok) { disposeObserved(execution); return execution }
       if (!execution.value.output) { disposeObserved(execution); return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Processing did not create an output artifact.' } } }
-       if (execution.value.output.artifact.size > 32 * 1024 * 1024) { disposeArtifact(execution.value.output.artifact); return { ok: false, error: { code: 'LIMIT_EXCEEDED', message: 'Output artifact exceeds the bounded output limit.' } } }
       const executorArtifact = execution.value.output.artifact
        const captured = await executorArtifact.read(undefined, options?.signal)
        if (!captured.ok) { disposeArtifact(executorArtifact); return captured }

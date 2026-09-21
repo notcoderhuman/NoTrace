@@ -3,7 +3,7 @@ import type { OutputArtifact } from '../domain/artifact'
 import type { RemovalApproval, RemovalPlan } from '../domain/operation'
 import { JPEG_VERIFICATION_CHECK_IDS, type BoundaryResult, type VerificationResult } from '../domain/result'
 import { scanJpegForVerification, type IndependentJpegRecord } from './jpeg-verifier-scanner'
-import { JPEG_PROCESSING_IDENTITY } from '../domain/identity'
+import { JPEG_PROCESSING_IDENTITY, sameProcessingIdentity } from '../domain/identity'
 import { structuralLimits } from '../classification/safety-policy'
 import type { AdapterContract, StaticCapabilityDeclaration, ResourceContract } from '../domain/contracts'
 
@@ -56,7 +56,7 @@ export async function verifyJpegOutputIndependently(input: LocalInput, output: O
   if (!generatedAgain.ok || !equalBytes(generated.value, generatedAgain.value)) return fail('Output artifact changed during verification.', 'output-unchanged')
   if (output.id === input.descriptor.id) return fail('Output artifact identity is not distinct.', 'distinct-artifact')
   const sourceFingerprint = await sha256(original.value)
-  if (approval.planId !== plan.id || approval.inputId !== plan.input.id || approval.sourceFingerprint !== plan.sourceFingerprint || approval.sourceFingerprint !== sourceFingerprint || (approval.identity && (!plan.identity || JSON.stringify(approval.identity) !== JSON.stringify(plan.identity)))) return fail('Verification approval does not match the planned source.', 'approval-binding')
+  if (approval.planId !== plan.id || approval.inputId !== plan.input.id || approval.sourceFingerprint !== plan.sourceFingerprint || approval.sourceFingerprint !== sourceFingerprint || (approval.identity && (!plan.identity || !sameProcessingIdentity(approval.identity, plan.identity)))) return fail('Verification approval does not match the planned source.', 'approval-binding')
   const source = scanJpegForVerification(original.value, signal)
   if (!source.ok) return source
   const observed = scanJpegForVerification(generated.value, signal)
