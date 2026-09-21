@@ -29,6 +29,44 @@ function observedArtifacts(value: unknown): OutputArtifact[] {
 function disposeObserved(value: unknown): void { for (const artifact of observedArtifacts(value)) disposeArtifact(artifact) }
 function disposePair(first: OutputArtifact | undefined, second?: OutputArtifact): void { disposeArtifact(first); if (second && second !== first) disposeArtifact(second) }
 
+const OPERATION_DEADLINE_MS = 30_000
+function cancelled(): BoundaryResult<never> { return { ok: false, error: { code: 'CANCELLED', message: 'Removal was cancelled.' } } }
+function processingFailure(message: string): BoundaryResult<never> { return { ok: false, error: { code: 'PROCESSING_FAILED', message } } }
+async function bounded<T>(operation: Promise<T>, signal: AbortSignal | undefined): Promise<BoundaryResult<T>> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let settled = false
+  let abandoned = false
+  const guarded = Promise.resolve(operation)
+  const late = guarded.then(value => { if (abandoned || signal?.aborted) disposeObserved(value); return undefined }, () => undefined)
+  const abort = new Promise<BoundaryResult<T>>(resolve => {
+    const finish = () => { if (!settled) resolve(signal?.aborted ? cancelled() : processingFailure('Local processing exceeded its bounded operation deadline.')) }
+    if (signal?.aborted) { finish(); return }
+    const onAbort = () => { signal?.removeEventListener('abort', onAbort); finish() }
+    signal?.addEventListener('abort', onAbort, { once: true })
+    timer = setTimeout(() => { signal?.removeEventListener('abort', onAbort); finish() }, OPERATION_DEADLINE_MS)
+  })
+  const result = await Promise.race([guarded.then(value => ({ ok: true as const, value })), abort])
+  settled = true
+  abandoned = !(result as any).ok || (result as any).value === undefined || Boolean(signal?.aborted)
+  if (signal?.aborted && (result as any).ok && (result as any).value !== undefined) disposeObserved((result as any).value)
+  if (timer) clearTimeout(timer)
+  void late
+  return result
+}
+
+function validBoundaryError(value: unknown): value is { code: string; message: string } {
+  try { return Boolean(value && typeof value === 'object' && typeof (value as any).code === 'string' && typeof (value as any).message === 'string') } catch { return false }
+}
+function validExecutorEnvelope(value: unknown): value is { ok: boolean; value?: any; error?: any } {
+  try {
+    if (!value || typeof value !== 'object' || typeof (value as any).ok !== 'boolean') return false
+    if (!(value as any).ok) return validBoundaryError((value as any).error)
+    const output = (value as any).value?.output
+    const artifact = output?.artifact
+    return Boolean((value as any).value && typeof (value as any).value === 'object' && output && typeof output === 'object' && artifact && typeof artifact === 'object' && typeof artifact.read === 'function' && typeof artifact.dispose === 'function' && Number.isSafeInteger(artifact.size) && artifact.size >= 0 && artifact.size <= 32 * 1024 * 1024)
+  } catch { return false }
+}
+
 async function validVerification(request: any, verified: any, executionArtifact: OutputArtifact, expectedCheckIds: readonly string[] | undefined, expectedMediaType?: string): Promise<boolean> {
   if (!expectedCheckIds || expectedCheckIds.length === 0 || new Set(expectedCheckIds).size !== expectedCheckIds.length || !verified.kind || verified.kind !== 'verification' || !verified.output || verified.status !== 'success' || verified.outputCreated !== true || verified.output !== executionArtifact || typeof verified.output.dispose !== 'function' || typeof verified.output.read !== 'function' || !Number.isSafeInteger(verified.output.size) || verified.output.size < 0 || typeof verified.output.mediaType !== 'string' || (expectedMediaType && verified.output.mediaType !== expectedMediaType) || !sameProcessingIdentity(verified.identity, request.plan.identity)) return false
   const actual = await verified.output.read()
@@ -70,9 +108,12 @@ export function createProcessingBoundary(registry: FormatAdapterRegistry): Local
       const adapter = await registry.resolveVerified(request.input, 'remove', options?.signal)
       if (!adapter.ok) return adapter.error.code === 'CANCELLED' ? adapter : { ok: false, error: { code: 'UNSUPPORTED', message: 'No identity-bound removal execution adapter is available for this plan.' } }
        if (!adapter.value.remove || !sameProcessingIdentity(adapter.value.contract?.conformance.declaration.processingIdentity, request.plan.identity)) return { ok: false, error: { code: 'UNSUPPORTED', message: 'No identity-bound removal execution adapter is available for this plan.' } }
-      let execution: BoundaryResult<ProcessingResult>
-      try { execution = await adapter.value.remove(request.input, request.plan, request.approval, options?.signal) } catch (error) { disposeObserved(error); return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Local processing could not be completed.' } } }
-      if (!execution.ok) { disposeObserved(execution); return execution }
+       let rawExecution: unknown
+       try { rawExecution = await bounded(adapter.value.remove(request.input, request.plan, request.approval, options?.signal), options?.signal) } catch (error) { disposeObserved(error); return processingFailure('Local processing could not be completed.') }
+       if (!(rawExecution as any)?.ok) return { ok: false, error: validBoundaryError((rawExecution as any)?.error) ? (rawExecution as any).error : { code: 'PROCESSING_FAILED', message: 'Executor returned a malformed result.' } }
+       const execution = (rawExecution as any).value
+       if (!validExecutorEnvelope(execution)) { disposeObserved(execution); return processingFailure('Executor returned a malformed processing result.') }
+       if (!execution.ok) { disposeObserved(execution); return { ok: false, error: execution.error } }
       if (!execution.value.output) { disposeObserved(execution); return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Processing did not create an output artifact.' } } }
       const executorArtifact = execution.value.output.artifact
        if (!executorArtifact || typeof executorArtifact !== 'object' || typeof executorArtifact.read !== 'function' || typeof executorArtifact.dispose !== 'function') { disposeObserved(execution); return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Processing returned an invalid output artifact.' } } }
