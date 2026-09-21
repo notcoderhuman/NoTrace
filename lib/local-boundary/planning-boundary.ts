@@ -17,7 +17,8 @@ export function createPlanningBoundary(registry: FormatAdapterRegistry): LocalPr
       if (!valid.ok) return valid
       if (options?.signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Inspection was cancelled.' } }
       const resolved = await registry.resolveVerified(input, 'inspect', options?.signal)
-      if (!resolved.ok || !resolved.value.inspect) return { ok: false, error: { code: 'UNSUPPORTED', message: 'No verified inspection adapter is available for this input.' } }
+      if (!resolved.ok) return resolved.error.code === 'CANCELLED' ? resolved : { ok: false, error: { code: 'UNSUPPORTED', message: 'No verified inspection adapter is available for this input.' } }
+       if (!resolved.value.inspect) return { ok: false, error: { code: 'UNSUPPORTED', message: 'No verified inspection adapter is available for this input.' } }
       if (options?.signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Inspection was cancelled.' } }
       try { return await resolved.value.inspect(input, options?.signal) } catch { return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Local inspection could not be completed.' } } }
     },
@@ -26,7 +27,8 @@ export function createPlanningBoundary(registry: FormatAdapterRegistry): LocalPr
       if (!valid.ok) return valid
       if (options?.signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Removal planning was cancelled.' } }
       const resolved = await registry.resolveVerified(request.input, 'inspect', options?.signal)
-      if (!resolved.ok || !resolved.value.planRemoval) return { ok: false, error: { code: 'UNSUPPORTED', message: 'No verified removal planning adapter is available for this input.' } }
+      if (!resolved.ok) return resolved.error.code === 'CANCELLED' ? resolved : { ok: false, error: { code: 'UNSUPPORTED', message: 'No verified removal planning adapter is available for this input.' } }
+       if (!resolved.value.planRemoval) return { ok: false, error: { code: 'UNSUPPORTED', message: 'No verified removal planning adapter is available for this input.' } }
       if (options?.signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Removal planning was cancelled.' } }
       try { return await resolved.value.planRemoval(request.input, request.fieldIds, request.policy, options?.signal) } catch { return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Local removal planning could not be completed.' } } }
     },
