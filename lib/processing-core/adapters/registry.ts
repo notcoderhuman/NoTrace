@@ -64,7 +64,7 @@ const approvedVerifierAuthorities: readonly (ApprovedVerifierAuthority & { imple
   { adapterId: 'png-verifier', formatId: 'png', compatibilityKey: PNG_PROCESSING_IDENTITY.verifierCompatibilityKey, identity: PNG_PROCESSING_IDENTITY, checkIds: PNG_VERIFICATION_CHECK_IDS, implementation: pngVerifierAdapter.verifyOutput },
 ])
 const approvedTransformerImplementations: Readonly<Record<string, unknown>> = Object.freeze({ 'jpeg-inspection': jpegAdapter.remove, 'png-transformer': pngAdapter.remove })
-function resourceAllowsInput(adapter: FormatAdapter, input: LocalInput): boolean { const max = adapter.contract?.conformance.resource.inputBound.maxBytes; return max === undefined || (Number.isSafeInteger(max) && max > 0 && (input.descriptor.size === undefined || input.descriptor.size <= max)) }
+function resourceAllowsInput(adapter: FormatAdapter, actualSize: number): boolean { const max = adapter.contract?.conformance.resource.inputBound.maxBytes; return max === undefined || (Number.isSafeInteger(max) && max > 0 && actualSize <= max) }
 function approvedVerifier(adapter: FormatAdapter): ApprovedVerifierAuthority | undefined {
   const declaration = adapter.contract?.conformance.declaration
   const trusted = approvedVerifierAuthorities.find(authority => authority.implementation === adapter.verifyOutput && authority.adapterId === adapter.id && authority.formatId === adapter.formatId && authority.compatibilityKey === adapter.verifierCompatibilityKey && declaration?.formatId === authority.formatId && declaration.verifierCompatibilityKey === authority.compatibilityKey && sameProcessingIdentity(declaration.processingIdentity, authority.identity) && sameStringSet(declaration.verificationCheckIds ?? [], authority.checkIds))
@@ -257,7 +257,11 @@ export function createFormatAdapterRegistry(): FormatAdapterRegistry {
     },
     async resolveVerified(input, operation, signal) {
       const destructive = destructiveOperations.has(operation)
-      const candidates = adapters.filter(candidate => resourceAllowsInput(candidate, input) && candidate.capability.operations.includes(operation)
+      let actualSize: number
+      try { const measured = await input.read(undefined, signal); if (!measured.ok) return measured; actualSize = measured.value.byteLength } catch { return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Input size could not be measured.' } } }
+      if (signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Content probing was cancelled.' } }
+      if (actualSize > 32 * 1024 * 1024) return { ok: false, error: { code: 'LIMIT_EXCEEDED', message: 'Input exceeds the bounded resource limit.' } }
+      const candidates = adapters.filter(candidate => resourceAllowsInput(candidate, actualSize) && candidate.capability.operations.includes(operation)
         && typeof candidate.probe === 'function'
         && typeof candidate.formatId === 'string' && candidate.formatId.trim()
         && (!destructive || (candidate.role === 'transformer' && validContract(candidate) && typeof candidate.verifierCompatibilityKey === 'string' && candidate.verifierCompatibilityKey.trim().length > 0)))
