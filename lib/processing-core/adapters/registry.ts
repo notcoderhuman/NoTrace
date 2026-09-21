@@ -8,7 +8,10 @@ import type { ProcessingResult, RemovalPlan } from '../domain/operation'
 import { sameProcessingIdentity, type ProcessingIdentity } from '../domain/identity'
 import { JPEG_PROCESSING_IDENTITY } from '../domain/identity'
 import { JPEG_VERIFICATION_CHECK_IDS } from '../domain/result'
-import { PNG_PROCESSING_IDENTITY, PNG_VERIFICATION_CHECK_IDS } from './png'
+import { PNG_PROCESSING_IDENTITY, PNG_VERIFICATION_CHECK_IDS, pngAdapter } from './png'
+import { jpegAdapter } from './jpeg'
+import { jpegVerifierAdapter } from './jpeg-verifier'
+import { pngVerifierAdapter } from './png-verifier'
 import { isStaticCapabilityDeclaration, isEvidenceRecord, type AdapterContract, type AdapterConformance, type EvidenceRecord, type FormatOperation, type StaticCapabilityDeclaration, type ResourceContract } from '../domain/contracts'
 
 export type AdapterCapability = Readonly<{
@@ -40,6 +43,8 @@ export type FormatAdapter = Readonly<{
   verifyOutput?: (input: LocalInput, output: import('../domain/artifact').OutputArtifact, plan: RemovalPlan, approval: import('../domain/operation').RemovalApproval, signal?: AbortSignal) => Promise<BoundaryResult<import('../domain/result').VerificationResult>>
 }>
 
+export type RegistryTrustOptions = Readonly<{ approvedVerifierImplementations?: readonly unknown[] }>
+
 export interface FormatAdapterRegistry {
   register(adapter: FormatAdapter): BoundaryResult<void>
   resolve(input: LocalInputDescriptor, operation: Operation): BoundaryResult<FormatAdapter>
@@ -56,14 +61,18 @@ const destructiveOperations = new Set<Operation>(['remove'])
 const contractOperationFor: Partial<Record<Operation, FormatOperation>> = { inspect: 'inspect', remove: 'executeRemoval', verify: 'verifyRemoval' }
 
 type ApprovedVerifierAuthority = Readonly<{ adapterId: string; formatId: string; compatibilityKey: string; identity: ProcessingIdentity; checkIds: readonly string[] }>
-const approvedVerifierAuthorities: readonly ApprovedVerifierAuthority[] = Object.freeze([
-  { adapterId: 'jpeg-verifier', formatId: 'jpeg', compatibilityKey: JPEG_PROCESSING_IDENTITY.verifierCompatibilityKey, identity: JPEG_PROCESSING_IDENTITY, checkIds: JPEG_VERIFICATION_CHECK_IDS },
-  { adapterId: 'png-verifier', formatId: 'png', compatibilityKey: PNG_PROCESSING_IDENTITY.verifierCompatibilityKey, identity: PNG_PROCESSING_IDENTITY, checkIds: PNG_VERIFICATION_CHECK_IDS },
+const approvedVerifierAuthorities: readonly (ApprovedVerifierAuthority & { implementation: unknown })[] = Object.freeze([
+  { adapterId: 'jpeg-verifier', formatId: 'jpeg', compatibilityKey: JPEG_PROCESSING_IDENTITY.verifierCompatibilityKey, identity: JPEG_PROCESSING_IDENTITY, checkIds: JPEG_VERIFICATION_CHECK_IDS, implementation: jpegVerifierAdapter.verifyOutput },
+  { adapterId: 'png-verifier', formatId: 'png', compatibilityKey: PNG_PROCESSING_IDENTITY.verifierCompatibilityKey, identity: PNG_PROCESSING_IDENTITY, checkIds: PNG_VERIFICATION_CHECK_IDS, implementation: pngVerifierAdapter.verifyOutput },
 ])
+const approvedTransformerImplementations: Readonly<Record<string, unknown>> = Object.freeze({ 'jpeg-inspection': jpegAdapter.remove, 'png-transformer': pngAdapter.remove })
 function resourceAllowsInput(adapter: FormatAdapter, input: LocalInput): boolean { const max = adapter.contract?.conformance.resource.inputBound.maxBytes; return max === undefined || (Number.isSafeInteger(max) && max > 0 && (input.descriptor.size === undefined || input.descriptor.size <= max)) }
-function approvedVerifier(adapter: FormatAdapter): ApprovedVerifierAuthority | undefined {
+function approvedVerifier(adapter: FormatAdapter, options?: RegistryTrustOptions): ApprovedVerifierAuthority | undefined {
   const declaration = adapter.contract?.conformance.declaration
-  return approvedVerifierAuthorities.find(authority => authority.adapterId === adapter.id && authority.formatId === adapter.formatId && authority.compatibilityKey === adapter.verifierCompatibilityKey && declaration?.formatId === authority.formatId && declaration.verifierCompatibilityKey === authority.compatibilityKey && sameProcessingIdentity(declaration.processingIdentity, authority.identity) && sameStringSet(declaration.verificationCheckIds ?? [], authority.checkIds))
+  const trusted = approvedVerifierAuthorities.find(authority => authority.implementation === adapter.verifyOutput && authority.adapterId === adapter.id && authority.formatId === adapter.formatId && authority.compatibilityKey === adapter.verifierCompatibilityKey && declaration?.formatId === authority.formatId && declaration.verifierCompatibilityKey === authority.compatibilityKey && sameProcessingIdentity(declaration.processingIdentity, authority.identity) && sameStringSet(declaration.verificationCheckIds ?? [], authority.checkIds))
+  if (trusted) return trusted
+  if (options?.approvedVerifierImplementations?.includes(adapter.verifyOutput) && !approvedVerifierAuthorities.some(item => item.adapterId === adapter.id) && declaration?.processingIdentity && declaration.verificationCheckIds) return { adapterId: adapter.id, formatId: adapter.formatId!, compatibilityKey: adapter.verifierCompatibilityKey!, identity: declaration.processingIdentity, checkIds: declaration.verificationCheckIds }
+  return undefined
 }
 
 function frozenList<T>(values: readonly T[]): readonly T[] {
@@ -118,6 +127,8 @@ function frozenContract(contract: AdapterContract): AdapterContract {
  * after registration can never change registry behaviour. Implementation functions are shared by
  * reference out of necessity; they are never an authority decision.
  */
+function probeSafeInput(input: LocalInput): LocalInput { return { descriptor: input.descriptor, read: (range, signal) => input.read(range, signal), release() { /* probes cannot release authoritative input */ } } }
+
 function snapshotAdapter(adapter: FormatAdapter): FormatAdapter {
   return Object.freeze({
     ...adapter,
@@ -207,7 +218,7 @@ function validContract(adapter: FormatAdapter): boolean {
   if (!executable.every(operation => actual.has(operation))) return false
   if (declaration.verificationCheckIds && adapter.verificationCheckIds && !sameStringSet(adapter.verificationCheckIds, declaration.verificationCheckIds)) return false
   if (declaration.operations.includes('inspect') && typeof contract.inspect !== 'function' && typeof adapter.inspect !== 'function' && !adapter.planRemoval) return false
-  if (declaration.operations.includes('planRemoval') && typeof contract.planRemoval !== 'function' && typeof adapter.planRemoval !== 'function') return false
+  if (declaration.operations.includes('planRemoval') && (!contract || (typeof contract.planRemoval !== 'function' && typeof adapter.planRemoval !== 'function'))) return false
   if (declaration.operations.includes('executeRemoval') && typeof contract.executeRemoval !== 'function' && typeof adapter.remove !== 'function') return false
   if (declaration.operations.includes('verifyRemoval') && typeof contract.verifyRemoval !== 'function' && typeof adapter.verifyOutput !== 'function') return false
   return true
@@ -228,7 +239,7 @@ function matches(adapter: FormatAdapter, input: LocalInputDescriptor, operation:
   return Boolean((extension && extensions.includes(extension)) || (input.mimeType && mimeTypes.includes(input.mimeType)))
 }
 
-export function createFormatAdapterRegistry(): FormatAdapterRegistry {
+export function createFormatAdapterRegistry(options?: RegistryTrustOptions): FormatAdapterRegistry {
   const adapters: FormatAdapter[] = []
   return {
     register(adapter) {
@@ -236,6 +247,7 @@ export function createFormatAdapterRegistry(): FormatAdapterRegistry {
       if (!shape.ok) return shape
       if (adapters.some(existing => existing.id === adapter.id)) return { ok: false, error: { code: 'INVALID_INPUT', message: `Adapter '${adapter.id}' is already registered.` } }
       const snapshot = snapshotAdapter(adapter)
+       if (isDestructive(snapshot) && snapshot.role === 'transformer' && snapshot.remove && approvedTransformerImplementations[snapshot.id] && snapshot.remove !== approvedTransformerImplementations[snapshot.id]) return { ok: false, error: { code: 'INVALID_INPUT', message: 'Reserved transformer implementation binding mismatch.' } }
       if (isDestructive(snapshot) && !validContract(snapshot)) return { ok: false, error: { code: 'INVALID_INPUT', message: 'Destructive adapters require a valid canonical AdapterContract and conformance declaration.' } }
       adapters.push(snapshot)
       return { ok: true, value: undefined }
@@ -255,7 +267,7 @@ export function createFormatAdapterRegistry(): FormatAdapterRegistry {
       for (const candidate of candidates) {
         if (signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Content probing was cancelled.' } }
         let probed: BoundaryResult<ContentProbe>
-        try { probed = await candidate.probe!(input, signal) } catch { return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Content probing could not be completed.' } } }
+        try { probed = await candidate.probe!(probeSafeInput(input), signal) } catch { return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Content probing could not be completed.' } } }
         if (signal?.aborted) return { ok: false, error: { code: 'CANCELLED', message: 'Content probing was cancelled.' } }
         if (!probed.ok) { if (probed.error.code === 'CANCELLED' || probed.error.code === 'LIMIT_EXCEEDED') return probed; continue }
         if (!probed.value || probed.value.confidence !== 'structural' || probed.value.formatId !== candidate.formatId || !candidate.capability.mimeTypes.includes(probed.value.mediaType)) continue
@@ -280,7 +292,7 @@ export function createFormatAdapterRegistry(): FormatAdapterRegistry {
       if (!compatibilityKey || !compatibilityKey.trim()) return { ok: false, error: { code: 'UNSUPPORTED', message: 'A verifier compatibility key is required for destructive execution.' } }
       const executor = adapters.find(candidate => candidate.id === executorId)
       if (!executor || executor.role !== 'transformer' || !executor.verifierCompatibilityKey || executor.verifierCompatibilityKey !== compatibilityKey) return { ok: false, error: { code: 'UNSUPPORTED', message: 'The destructive executor is not a compatible transformer.' } }
-      const candidates = adapters.filter(candidate => candidate.capability.operations.includes('verify') && approvedVerifier(candidate)?.identity && sameProcessingIdentity(approvedVerifier(candidate)?.identity, adapterProcessingIdentity(executor)) && candidate.role === 'verifier' && validContract(candidate) && candidate.contract?.conformance.independentVerifier === true && typeof candidate.verifyOutput === 'function' && candidate.id !== executorId && candidate.verifierIndependence === 'structural-independent' && approvedVerifier(candidate) !== undefined && typeof candidate.probe === 'function' && typeof candidate.formatId === 'string' && candidate.formatId.trim() && candidate.verifierCompatibilityKey === compatibilityKey && (candidate.verifyOutput as unknown) !== (executor.remove as unknown) && (candidate.verifyOutput as unknown) !== (executor.contract?.executeRemoval as unknown))
+      const candidates = adapters.filter(candidate => candidate.capability.operations.includes('verify') && approvedVerifier(candidate, options)?.identity && sameProcessingIdentity(approvedVerifier(candidate, options)?.identity, adapterProcessingIdentity(executor)) && candidate.role === 'verifier' && validContract(candidate) && candidate.contract?.conformance.independentVerifier === true && typeof candidate.verifyOutput === 'function' && candidate.id !== executorId && candidate.verifierIndependence === 'structural-independent' && approvedVerifier(candidate, options) !== undefined && typeof candidate.probe === 'function' && typeof candidate.formatId === 'string' && candidate.formatId.trim() && candidate.verifierCompatibilityKey === compatibilityKey && (candidate.verifyOutput as unknown) !== (executor.remove as unknown) && (candidate.verifyOutput as unknown) !== (executor.contract?.executeRemoval as unknown))
       if (!candidates.length) return { ok: false, error: { code: 'UNSUPPORTED', message: 'No content-verified independent verifier is registered.' } }
       const matched: FormatAdapter[] = []
       for (const candidate of candidates) {

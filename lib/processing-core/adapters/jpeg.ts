@@ -335,16 +335,16 @@ export const jpegContract: AdapterContract = {
   verifyRemoval: async (context, output, plan, approval) => verifyJpegOutputIndependently(context.input, output, plan, approval, context.signal),
 }
 
-export const jpegAdapter: FormatAdapter & { inspect: typeof inspectJpeg } = {
+export const jpegAdapter: FormatAdapter & { inspect: typeof inspectJpeg } = Object.freeze({
   id: 'jpeg-inspection',
   role: 'transformer',
   formatId: 'jpeg', engineId: 'notrace-jpeg', engineVersion: '1', capabilityKey: 'jpeg:remove-com', verifierCompatibilityKey: 'notrace-jpeg-com-v1', verificationCheckIds: JPEG_VERIFICATION_CHECK_IDS,
   probe: async (input, signal) => { const prefix = await probePrefix(input, 2, signal); if (!prefix.ok) return prefix; return prefix.value.length === 2 && prefix.value[0] === 0xff && prefix.value[1] === 0xd8 ? { ok: true, value: { formatId: 'jpeg', mediaType: 'image/jpeg', confidence: 'structural' as const } } : { ok: false, error: { code: 'UNSUPPORTED' as const, message: 'Input is not a JPEG stream.' } } },
-  capability: { extensions: ['jpg', 'jpeg'], mimeTypes: ['image/jpeg'], operations: ['inspect', 'remove'] },
+  capability: { extensions: ['jpg', 'jpeg'], mimeTypes: ['image/jpeg'], operations: ['inspect', 'remove'] as const },
   conformance: jpegConformance,
   evidence: jpegEvidenceFromInspection,
   contract: jpegContract,
   inspect: (input, signal) => jpegContract.inspect!({ input, descriptor: input.descriptor, signal }),
   planRemoval: (input, targetIds, policy, signal) => jpegContract.planRemoval!({ input, descriptor: input.descriptor, signal }, targetIds),
   remove: (input, plan, approval, signal) => jpegContract.executeRemoval!({ input, descriptor: input.descriptor, signal }, plan, approval),
-}
+})

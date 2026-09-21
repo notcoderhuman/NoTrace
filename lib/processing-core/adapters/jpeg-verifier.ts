@@ -103,7 +103,7 @@ const jpegVerifierContract: AdapterContract = {
   verifyRemoval: async (context, output, plan, approval) => verifyJpegOutputIndependently(context.input, output, plan, approval, context.signal),
 }
 
-export const jpegVerifierAdapter = {
+export const jpegVerifierAdapter = Object.freeze({
   id: 'jpeg-verifier',
   role: 'verifier' as const,
   formatId: 'jpeg', engineId: 'notrace-jpeg', engineVersion: '1', capabilityKey: 'jpeg:verify', verifierCompatibilityKey: 'notrace-jpeg-com-v1', verifierIndependence: 'structural-independent' as const, verificationCheckIds: JPEG_VERIFICATION_CHECK_IDS,
@@ -112,4 +112,4 @@ export const jpegVerifierAdapter = {
   conformance: jpegVerifierContract.conformance,
   contract: jpegVerifierContract,
   verifyOutput: verifyJpegOutputIndependently,
-}
+})

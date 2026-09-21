@@ -6,9 +6,9 @@ import { pngVerifierAdapter } from '../processing-core/adapters/png-verifier'
 
 export function createDefaultFormatAdapterRegistry() {
   const registry = createFormatAdapterRegistry()
-  registry.register(jpegAdapter)
-  registry.register(jpegVerifierAdapter)
-  registry.register(pngAdapter)
-  registry.register(pngVerifierAdapter)
+  for (const adapter of [jpegAdapter, jpegVerifierAdapter, pngAdapter, pngVerifierAdapter]) {
+    const result = registry.register(adapter)
+    if (!result.ok) throw new Error(`Canonical adapter registration failed: ${result.error.message}`)
+  }
   return registry
 }
