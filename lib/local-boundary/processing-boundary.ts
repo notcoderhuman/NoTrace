@@ -9,22 +9,24 @@ import { sameProcessingIdentity } from '../processing-core/domain/identity'
 import { validateRemovalApproval } from '../processing-core/classification/policy'
 
 function validate(input: LocalInput): BoundaryResult<void> {
-  const descriptor = input.descriptor
-  const sources = ['browser-file', 'blob', 'stream', 'filesystem-handle', 'opaque', 'memory']
-  if (typeof descriptor.id !== 'string' || !descriptor.id.trim() || descriptor.id.length > 256 || typeof descriptor.filename !== 'string' || !descriptor.filename.trim() || descriptor.filename.length > 255) return { ok: false, error: { code: 'INVALID_INPUT', message: 'A bounded local input identity and filename are required.' } }
-  if (!sources.includes(descriptor.source) || (descriptor.size !== undefined && (!Number.isSafeInteger(descriptor.size) || descriptor.size < 0))) return { ok: false, error: { code: 'INVALID_INPUT', message: 'Local input descriptor is invalid.' } }
-  return { ok: true, value: undefined }
+  try {
+    const descriptor = input.descriptor
+    const sources = ['browser-file', 'blob', 'stream', 'filesystem-handle', 'opaque', 'memory']
+    if (!descriptor || typeof descriptor !== 'object' || typeof descriptor.id !== 'string' || !descriptor.id.trim() || descriptor.id.length > 256 || typeof descriptor.filename !== 'string' || !descriptor.filename.trim() || descriptor.filename.length > 255) return { ok: false, error: { code: 'INVALID_INPUT', message: 'A bounded local input identity and filename are required.' } }
+    if (!sources.includes(descriptor.source) || (descriptor.size !== undefined && (!Number.isSafeInteger(descriptor.size) || descriptor.size < 0))) return { ok: false, error: { code: 'INVALID_INPUT', message: 'Local input descriptor is invalid.' } }
+    return { ok: true, value: undefined }
+  } catch { return { ok: false, error: { code: 'INVALID_INPUT', message: 'Local input descriptor is invalid.' } } }
 }
 
 /** Returned artifacts are observable only through the typed result envelope. */
 function observedArtifacts(value: unknown): OutputArtifact[] {
-  const candidates = [
-    (value as { value?: { output?: { artifact?: OutputArtifact } } } | undefined)?.value?.output?.artifact,
-    (value as { error?: { output?: { artifact?: OutputArtifact } } } | undefined)?.error?.output?.artifact,
-    (value as { value?: { artifact?: OutputArtifact } } | undefined)?.value?.artifact,
-    (value as { error?: { artifact?: OutputArtifact } } | undefined)?.error?.artifact,
-  ]
-  return candidates.filter((artifact, index): artifact is OutputArtifact => Boolean(artifact && typeof artifact.dispose === 'function' && candidates.indexOf(artifact) === index))
+  const candidates: unknown[] = []
+  const read = (object: unknown, key: string): unknown => { try { return object && typeof object === 'object' ? (object as Record<string, unknown>)[key] : undefined } catch { return undefined } }
+  const valuePart = read(value, 'value'); const errorPart = read(value, 'error')
+  candidates.push(read(read(valuePart, 'output'), 'artifact'), read(errorPart && read(errorPart, 'output'), 'artifact'), read(valuePart, 'artifact'), read(errorPart, 'artifact'))
+  const result: OutputArtifact[] = []
+  for (const candidate of candidates) { try { if (candidate && typeof candidate === 'object' && typeof (candidate as any).dispose === 'function' && !result.includes(candidate as OutputArtifact)) result.push(candidate as OutputArtifact) } catch {} }
+  return result
 }
 function disposeObserved(value: unknown): void { for (const artifact of observedArtifacts(value)) disposeArtifact(artifact) }
 function disposePair(first: OutputArtifact | undefined, second?: OutputArtifact): void { disposeArtifact(first); if (second && second !== first) disposeArtifact(second) }
@@ -119,7 +121,7 @@ export function createProcessingBoundary(registry: FormatAdapterRegistry): Local
        if (!executorArtifact || typeof executorArtifact !== 'object' || typeof executorArtifact.read !== 'function' || typeof executorArtifact.dispose !== 'function') { disposeObserved(execution); return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Processing returned an invalid output artifact.' } } }
        if (options?.signal?.aborted) { disposeArtifact(executorArtifact); return { ok: false, error: { code: 'CANCELLED', message: 'Removal was cancelled.' } } }
        let captured: unknown
-       try { captured = await executorArtifact.read(undefined, options?.signal) } catch { disposeArtifact(executorArtifact); return options?.signal?.aborted ? { ok: false, error: { code: 'CANCELLED', message: 'Removal was cancelled.' } } : { ok: false, error: { code: 'VERIFICATION_FAILED', message: 'Output artifact capture failed.' } } }
+       try { const captureResult = await bounded(executorArtifact.read(undefined, options?.signal), options?.signal); if (!captureResult.ok) { disposeArtifact(executorArtifact); return captureResult } captured = captureResult.value } catch { disposeArtifact(executorArtifact); return options?.signal?.aborted ? { ok: false, error: { code: 'CANCELLED', message: 'Removal was cancelled.' } } : { ok: false, error: { code: 'VERIFICATION_FAILED', message: 'Output artifact capture failed.' } } }
        if (!captured || typeof captured !== 'object' || typeof (captured as any).ok !== 'boolean') { disposeArtifact(executorArtifact); return { ok: false, error: { code: 'VERIFICATION_FAILED', message: 'Output capture returned a malformed result.' } } }
        if (!(captured as any).ok) { const error = (captured as any).error; disposeArtifact(executorArtifact); return error && typeof error.code === 'string' && typeof error.message === 'string' ? captured as BoundaryResult<never> : { ok: false, error: { code: 'VERIFICATION_FAILED', message: 'Output capture returned a malformed failure.' } } }
        if (!((captured as any).value instanceof Uint8Array)) { disposeArtifact(executorArtifact); return { ok: false, error: { code: 'VERIFICATION_FAILED', message: 'Output capture must return owned Uint8Array bytes.' } } }
