@@ -43,8 +43,6 @@ export type FormatAdapter = Readonly<{
   verifyOutput?: (input: LocalInput, output: import('../domain/artifact').OutputArtifact, plan: RemovalPlan, approval: import('../domain/operation').RemovalApproval, signal?: AbortSignal) => Promise<BoundaryResult<import('../domain/result').VerificationResult>>
 }>
 
-export type RegistryTrustOptions = Readonly<{ approvedVerifierImplementations?: readonly unknown[] }>
-
 export interface FormatAdapterRegistry {
   register(adapter: FormatAdapter): BoundaryResult<void>
   resolve(input: LocalInputDescriptor, operation: Operation): BoundaryResult<FormatAdapter>
@@ -67,11 +65,10 @@ const approvedVerifierAuthorities: readonly (ApprovedVerifierAuthority & { imple
 ])
 const approvedTransformerImplementations: Readonly<Record<string, unknown>> = Object.freeze({ 'jpeg-inspection': jpegAdapter.remove, 'png-transformer': pngAdapter.remove })
 function resourceAllowsInput(adapter: FormatAdapter, input: LocalInput): boolean { const max = adapter.contract?.conformance.resource.inputBound.maxBytes; return max === undefined || (Number.isSafeInteger(max) && max > 0 && (input.descriptor.size === undefined || input.descriptor.size <= max)) }
-function approvedVerifier(adapter: FormatAdapter, options?: RegistryTrustOptions): ApprovedVerifierAuthority | undefined {
+function approvedVerifier(adapter: FormatAdapter): ApprovedVerifierAuthority | undefined {
   const declaration = adapter.contract?.conformance.declaration
   const trusted = approvedVerifierAuthorities.find(authority => authority.implementation === adapter.verifyOutput && authority.adapterId === adapter.id && authority.formatId === adapter.formatId && authority.compatibilityKey === adapter.verifierCompatibilityKey && declaration?.formatId === authority.formatId && declaration.verifierCompatibilityKey === authority.compatibilityKey && sameProcessingIdentity(declaration.processingIdentity, authority.identity) && sameStringSet(declaration.verificationCheckIds ?? [], authority.checkIds))
   if (trusted) return trusted
-  if (options?.approvedVerifierImplementations?.includes(adapter.verifyOutput) && !approvedVerifierAuthorities.some(item => item.adapterId === adapter.id) && declaration?.processingIdentity && declaration.verificationCheckIds) return { adapterId: adapter.id, formatId: adapter.formatId!, compatibilityKey: adapter.verifierCompatibilityKey!, identity: declaration.processingIdentity, checkIds: declaration.verificationCheckIds }
   return undefined
 }
 
@@ -127,7 +124,7 @@ function frozenContract(contract: AdapterContract): AdapterContract {
  * after registration can never change registry behaviour. Implementation functions are shared by
  * reference out of necessity; they are never an authority decision.
  */
-function probeSafeInput(input: LocalInput): LocalInput { return { descriptor: input.descriptor, read: (range, signal) => input.read(range, signal), release() { /* probes cannot release authoritative input */ } } }
+function probeSafeInput(input: LocalInput): LocalInput { const descriptor = Object.freeze({ ...input.descriptor }); return { descriptor, read: (range, signal) => input.read(range, signal), release() { /* probes cannot release authoritative input */ } } }
 
 function snapshotAdapter(adapter: FormatAdapter): FormatAdapter {
   return Object.freeze({
@@ -239,10 +236,11 @@ function matches(adapter: FormatAdapter, input: LocalInputDescriptor, operation:
   return Boolean((extension && extensions.includes(extension)) || (input.mimeType && mimeTypes.includes(input.mimeType)))
 }
 
-export function createFormatAdapterRegistry(options?: RegistryTrustOptions): FormatAdapterRegistry {
+export function createFormatAdapterRegistry(): FormatAdapterRegistry {
   const adapters: FormatAdapter[] = []
   return {
     register(adapter) {
+      try {
       const shape = validateAdapterShape(adapter)
       if (!shape.ok) return shape
       if (adapters.some(existing => existing.id === adapter.id)) return { ok: false, error: { code: 'INVALID_INPUT', message: `Adapter '${adapter.id}' is already registered.` } }
@@ -251,6 +249,7 @@ export function createFormatAdapterRegistry(options?: RegistryTrustOptions): For
       if (isDestructive(snapshot) && !validContract(snapshot)) return { ok: false, error: { code: 'INVALID_INPUT', message: 'Destructive adapters require a valid canonical AdapterContract and conformance declaration.' } }
       adapters.push(snapshot)
       return { ok: true, value: undefined }
+      } catch { return { ok: false, error: { code: 'INVALID_INPUT', message: 'Adapter registration failed closed.' } } }
     },
     resolve(input, operation) {
       const adapter = adapters.find(candidate => matches(candidate, input, operation))
@@ -292,7 +291,7 @@ export function createFormatAdapterRegistry(options?: RegistryTrustOptions): For
       if (!compatibilityKey || !compatibilityKey.trim()) return { ok: false, error: { code: 'UNSUPPORTED', message: 'A verifier compatibility key is required for destructive execution.' } }
       const executor = adapters.find(candidate => candidate.id === executorId)
       if (!executor || executor.role !== 'transformer' || !executor.verifierCompatibilityKey || executor.verifierCompatibilityKey !== compatibilityKey) return { ok: false, error: { code: 'UNSUPPORTED', message: 'The destructive executor is not a compatible transformer.' } }
-      const candidates = adapters.filter(candidate => candidate.capability.operations.includes('verify') && approvedVerifier(candidate, options)?.identity && sameProcessingIdentity(approvedVerifier(candidate, options)?.identity, adapterProcessingIdentity(executor)) && candidate.role === 'verifier' && validContract(candidate) && candidate.contract?.conformance.independentVerifier === true && typeof candidate.verifyOutput === 'function' && candidate.id !== executorId && candidate.verifierIndependence === 'structural-independent' && approvedVerifier(candidate, options) !== undefined && typeof candidate.probe === 'function' && typeof candidate.formatId === 'string' && candidate.formatId.trim() && candidate.verifierCompatibilityKey === compatibilityKey && (candidate.verifyOutput as unknown) !== (executor.remove as unknown) && (candidate.verifyOutput as unknown) !== (executor.contract?.executeRemoval as unknown))
+      const candidates = adapters.filter(candidate => candidate.capability.operations.includes('verify') && approvedVerifier(candidate)?.identity && sameProcessingIdentity(approvedVerifier(candidate)?.identity, adapterProcessingIdentity(executor)) && candidate.role === 'verifier' && validContract(candidate) && candidate.contract?.conformance.independentVerifier === true && typeof candidate.verifyOutput === 'function' && candidate.id !== executorId && candidate.verifierIndependence === 'structural-independent' && approvedVerifier(candidate) !== undefined && typeof candidate.probe === 'function' && typeof candidate.formatId === 'string' && candidate.formatId.trim() && candidate.verifierCompatibilityKey === compatibilityKey && (candidate.verifyOutput as unknown) !== (executor.remove as unknown) && (candidate.verifyOutput as unknown) !== (executor.contract?.executeRemoval as unknown))
       if (!candidates.length) return { ok: false, error: { code: 'UNSUPPORTED', message: 'No content-verified independent verifier is registered.' } }
       const matched: FormatAdapter[] = []
       for (const candidate of candidates) {

@@ -3,7 +3,7 @@ import type { LocalProcessingBoundary, BoundaryOptions } from '../processing-cor
 import type { LocalInput } from '../processing-core/domain/input'
 import type { InspectionResult } from '../processing-core/domain/metadata'
 import type { ProcessingResult, RemovalPlan } from '../processing-core/domain/operation'
-import { disposeArtifact, type OutputArtifact } from '../processing-core/domain/artifact'
+import { createMemoryArtifact, disposeArtifact, type OutputArtifact } from '../processing-core/domain/artifact'
 import { type BoundaryResult, type VerificationResult } from '../processing-core/domain/result'
 import { sameProcessingIdentity } from '../processing-core/domain/identity'
 import { validateRemovalApproval } from '../processing-core/classification/policy'
@@ -74,7 +74,12 @@ export function createProcessingBoundary(registry: FormatAdapterRegistry): Local
       if (!execution.ok) { disposeObserved(execution); return execution }
       if (!execution.value.output) { disposeObserved(execution); return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Processing did not create an output artifact.' } } }
        if (execution.value.output.artifact.size > 32 * 1024 * 1024) { disposeArtifact(execution.value.output.artifact); return { ok: false, error: { code: 'LIMIT_EXCEEDED', message: 'Output artifact exceeds the bounded output limit.' } } }
-      const executionArtifact = execution.value.output.artifact
+      const executorArtifact = execution.value.output.artifact
+       const captured = await executorArtifact.read(undefined, options?.signal)
+       if (!captured.ok) { disposeArtifact(executorArtifact); return captured }
+       if (captured.value.byteLength > 32 * 1024 * 1024) { disposeArtifact(executorArtifact); return { ok: false, error: { code: 'LIMIT_EXCEEDED', message: 'Output artifact exceeds the bounded output limit.' } } }
+       const executionArtifact = createMemoryArtifact(captured.value, execution.value.output.filename, executorArtifact.mediaType)
+       disposeArtifact(executorArtifact)
       let replacement: OutputArtifact | undefined
       const disposed = new Set<OutputArtifact>()
       const disposeOnce = (artifact: OutputArtifact | undefined) => { if (artifact && !disposed.has(artifact)) { disposed.add(artifact); disposeArtifact(artifact) } }

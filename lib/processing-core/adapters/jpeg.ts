@@ -326,14 +326,14 @@ export async function inspectJpegStructure(input: LocalInput, signal?: AbortSign
   return { ok: true, value: { ...parsed.value.inventory, sourceFingerprint: sourceHash.value } }
 }
 
-export const jpegContract: AdapterContract = {
+export const jpegContract: AdapterContract = Object.freeze({
   conformance: jpegConformance,
   evidence: jpegEvidenceFromInspection,
   inspect: async (context: ContractOperationContext) => inspectJpeg(context.input, context.signal),
   planRemoval: async (context: ContractOperationContext, targetIds) => planJpegRemoval(context.input, targetIds, 'contract', context.signal),
   executeRemoval: async (context, plan, approval) => removeJpegCom(context.input, plan, approval, context.signal),
   verifyRemoval: async (context, output, plan, approval) => verifyJpegOutputIndependently(context.input, output, plan, approval, context.signal),
-}
+})
 
 export const jpegAdapter: FormatAdapter & { inspect: typeof inspectJpeg } = Object.freeze({
   id: 'jpeg-inspection',
@@ -346,5 +346,5 @@ export const jpegAdapter: FormatAdapter & { inspect: typeof inspectJpeg } = Obje
   contract: jpegContract,
   inspect: (input, signal) => jpegContract.inspect!({ input, descriptor: input.descriptor, signal }),
   planRemoval: (input, targetIds, policy, signal) => jpegContract.planRemoval!({ input, descriptor: input.descriptor, signal }, targetIds),
-  remove: (input, plan, approval, signal) => jpegContract.executeRemoval!({ input, descriptor: input.descriptor, signal }, plan, approval),
+  remove: removeJpegCom,
 })
