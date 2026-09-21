@@ -75,10 +75,12 @@ export function createProcessingBoundary(registry: FormatAdapterRegistry): Local
       if (!execution.ok) { disposeObserved(execution); return execution }
       if (!execution.value.output) { disposeObserved(execution); return { ok: false, error: { code: 'PROCESSING_FAILED', message: 'Processing did not create an output artifact.' } } }
       const executorArtifact = execution.value.output.artifact
-       const captured = await executorArtifact.read(undefined, options?.signal)
+       let captured: BoundaryResult<Uint8Array>
+       try { captured = await executorArtifact.read(undefined, options?.signal) } catch { disposeArtifact(executorArtifact); return { ok: false, error: { code: 'VERIFICATION_FAILED', message: 'Output artifact capture failed.' } } }
        if (!captured.ok) { disposeArtifact(executorArtifact); return captured }
+       if (!(captured.value instanceof Uint8Array)) { disposeArtifact(executorArtifact); return { ok: false, error: { code: 'VERIFICATION_FAILED', message: 'Output capture must return owned Uint8Array bytes.' } } }
        if (captured.value.byteLength > 32 * 1024 * 1024) { disposeArtifact(executorArtifact); return { ok: false, error: { code: 'LIMIT_EXCEEDED', message: 'Output artifact exceeds the bounded output limit.' } } }
-       const executionArtifact = createMemoryArtifact(captured.value, execution.value.output.filename, executorArtifact.mediaType)
+       const executionArtifact = createMemoryArtifact(captured.value.slice(), execution.value.output.filename, executorArtifact.mediaType)
        disposeArtifact(executorArtifact)
       let replacement: OutputArtifact | undefined
       const disposed = new Set<OutputArtifact>()
