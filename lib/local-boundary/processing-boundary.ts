@@ -94,8 +94,8 @@ export function createProcessingBoundary(registry: FormatAdapterRegistry): Local
          if (!verifier.ok || !verifier.value.verifyOutput) { disposeOnce(executionArtifact); return { ok: false, error: { code: 'UNSUPPORTED', message: 'No independent verification adapter is available for this output.' } } }
         let verified: BoundaryResult<VerificationResult>
         try { verified = await verifier.value.verifyOutput(request.input, executionArtifact, request.plan, request.approval, options?.signal) } catch (error) { disposeOnce(executionArtifact); disposeObserved(error); return { ok: false, error: { code: 'VERIFICATION_FAILED', message: 'Independent verification could not be completed.' } } }
-        if (!verified.ok) { disposeOnce(executionArtifact); for (const artifact of observedArtifacts(verified)) disposeOnce(artifact); return verified }
-        if (verified.value.output && verified.value.output !== executionArtifact) { disposeOnce(executionArtifact); disposeOnce(verified.value.output); return { ok: false, error: { code: 'VERIFICATION_FAILED', message: 'Verifier returned a replacement artifact.' } } }
+        if (!verified.ok) { disposeOnce(executionArtifact); for (const artifact of observedArtifacts(verified)) disposeOnce(artifact); return options?.signal?.aborted ? { ok: false, error: { code: 'CANCELLED', message: 'Removal was cancelled.' } } : verified }
+        if (verified.value.output && verified.value.output !== executionArtifact) { disposeOnce(executionArtifact); disposeOnce(verified.value.output); return options?.signal?.aborted ? { ok: false, error: { code: 'CANCELLED', message: 'Removal was cancelled.' } } : { ok: false, error: { code: 'VERIFICATION_FAILED', message: 'Verifier returned a replacement artifact.' } } }
         replacement = verified.value.output
         if (options?.signal?.aborted) { disposeOnce(executionArtifact); disposeOnce(replacement); return { ok: false, error: { code: 'CANCELLED', message: 'Removal was cancelled.' } } }
         // The expected check set comes from the verifier's canonical contract declaration — never
